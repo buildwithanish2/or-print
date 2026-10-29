@@ -27,6 +27,10 @@ Status: **not ready to deploy** until all blocking items below are resolved and 
 
 ## Secrets, origins, and container configuration
 
+- [ ] Deploy the customer, shop, and admin Vite portals as separate Vercel projects; deploy the Express API on a persistent Docker host with SQLite, uploads, and private evidence volumes. Follow [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). Do not use Vercel's temporary function filesystem for the production SQLite DB or uploaded documents.
+- [ ] Ensure all three Vercel projects have their `vercel.json` SPA fallback, Root Directory set to their `apps/*` folder, and shared source files enabled so root workspace packages resolve.
+- [ ] Build and include Windows print-agent packages in the API image/release when the dashboard's installer download is enabled. The generated binaries are not stored in Git.
+
 - [ ] Use unique, random `JWT_SECRET` and `JWT_REFRESH_SECRET` (32+ chars, different values) and a unique `PAYMENT_CREDENTIALS_ENCRYPTION_KEY` (32 random bytes, 64 hex characters) in a secret manager.
 - [ ] Back up and rotate existing plaintext shop payment credentials using [PAYMENT_SETUP.md](PAYMENT_SETUP.md). First dry-run the maintenance script against the verified production backup; do not enable payment writes until encryption status and gateway health are confirmed.
 - [ ] Set platform Razorpay sandbox credentials first. Configure `RAZORPAY_WEBHOOK_SECRET` and HTTPS webhook URL; only switch to live keys after merchant ownership, webhook, payment, and receipt tests pass. Shop printing Razorpay credentials are separate; platform subscription merchant credentials must not receive customer shop funds.

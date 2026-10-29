@@ -138,6 +138,10 @@ docker compose up -d
 
 The schema is SQLite, so Compose does not start PostgreSQL or Redis. See the project docs for implementation scope and verification.
 
+## Vercel Frontends and API Host
+
+The customer, shop, and admin Vite portals can each be deployed as separate Vercel projects from this npm-workspaces repository. The Express API should run on a persistent Docker host with HTTPS, persistent SQLite/upload volumes, and Socket.IO support. See [Vercel deployment setup](docs/VERCEL_DEPLOYMENT.md) for project root directories, SPA rewrites, build variables, and production database gates.
+
 ## Checks
 
 ```bash
@@ -151,6 +155,7 @@ The current automated suite is small and covers page-range counting and request 
 ## Project documentation
 
 - [Project audit](docs/PROJECT_AUDIT.md)
+- [Vercel frontend and persistent API deployment](docs/VERCEL_DEPLOYMENT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Feature status](docs/FEATURE_STATUS.md)
 - [Bug fixes](docs/BUG_FIXES.md)
