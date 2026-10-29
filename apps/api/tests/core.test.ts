@@ -14,7 +14,7 @@ import { AgentController } from '../src/controllers/agent.controller';
 import { FreePrintController } from '../src/controllers/free-print.controller';
 import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
-import { requireAdmin } from '../src/middleware/rbac.middleware';
+import { requireAdmin, requireSuperAdmin } from '../src/middleware/rbac.middleware';
 import { errorHandler } from '../src/middleware/error.middleware';
 import { agentArtifactDownloadHeaders, agentReleaseMetadata, resolveAgentArtifact, canAgentReportStatus, canDispatchPrintJob } from '../src/services/agent-artifact.service';
 import fs from 'fs';
@@ -850,6 +850,19 @@ test('admin-only route middleware rejects shop owners and allows existing admini
     requireAdmin({ user: { id: 'user-1', email: 'x@example.com', role } } as any, response as any, (() => { passed = true; }) as any);
     return { statusCode, passed };
   };
+  assert.deepEqual(run('SHOP_OWNER'), { statusCode: 403, passed: false });
+  assert.deepEqual(run('SUPER_ADMIN'), { statusCode: 0, passed: true });
+});
+
+test('super-admin pricing middleware rejects regular admins and allows super administrators', () => {
+  const run = (role: string) => {
+    let statusCode = 0;
+    let passed = false;
+    const response = { status(code: number) { statusCode = code; return this; }, json() { return this; } };
+    requireSuperAdmin({ user: { id: 'user-1', email: 'x@example.com', role } } as any, response as any, (() => { passed = true; }) as any);
+    return { statusCode, passed };
+  };
+  assert.deepEqual(run('ADMIN'), { statusCode: 403, passed: false });
   assert.deepEqual(run('SHOP_OWNER'), { statusCode: 403, passed: false });
   assert.deepEqual(run('SUPER_ADMIN'), { statusCode: 0, passed: true });
 });

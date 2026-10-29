@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { FreePrintController, collegeEvidenceUpload } from '../controllers/free-print.controller';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
-import { requireAdmin, requireShopAccess } from '../middleware/rbac.middleware';
+import { requireAdmin, requireShopAccess, requireSuperAdmin } from '../middleware/rbac.middleware';
 
 const router = Router();
 const applyLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false });
@@ -17,10 +17,10 @@ router.get('/guest-verification/status', guestStatusLimiter, FreePrintController
 router.get('/verification/:id/evidence', authenticate, requireAdmin, FreePrintController.getEvidence);
 
 router.get('/admin', authenticate, requireAdmin, FreePrintController.adminGet);
-router.put('/admin/policy', authenticate, requireAdmin, FreePrintController.updatePolicy);
+router.put('/admin/policy', authenticate, requireSuperAdmin, FreePrintController.updatePolicy);
 router.post('/admin/institutions', authenticate, requireAdmin, FreePrintController.saveInstitution);
 router.put('/admin/institutions/:id', authenticate, requireAdmin, FreePrintController.saveInstitution);
-router.put('/admin/institutions/:id/pricing', authenticate, requireAdmin, FreePrintController.saveInstitutionPricing);
+router.put('/admin/institutions/:id/pricing', authenticate, requireSuperAdmin, FreePrintController.saveInstitutionPricing);
 router.put('/admin/shops/:shopId', authenticate, requireAdmin, FreePrintController.adminSetShopParticipation);
 router.patch('/admin/verifications/:id', authenticate, requireAdmin, FreePrintController.reviewVerification);
 
