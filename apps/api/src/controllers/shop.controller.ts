@@ -548,10 +548,8 @@ export class ShopController {
       const shopId = req.user?.shopId;
       if (!shopId) return res.status(400).json({ success: false, message: 'Shop ID required' });
 
-      // Generate format: ANP-8F4K-29QX
-      const rand1 = crypto.randomBytes(2).toString('hex').toUpperCase();
-      const rand2 = crypto.randomBytes(2).toString('hex').toUpperCase();
-      const pairingCode = `ANP-${rand1}-${rand2}`;
+      // 64-bit one-time code; the persistent agent credential is returned only after successful pairing.
+      const pairingCode = `ANP-${crypto.randomBytes(8).toString('hex').toUpperCase().match(/.{1,4}/g)!.join('-')}`;
       const agentToken = `agent_tok_${crypto.randomBytes(16).toString('hex')}`;
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
@@ -571,7 +569,6 @@ export class ShopController {
         message: 'Pairing code generated successfully',
         data: {
           pairingCode: agent.pairingCode,
-          agentToken: agent.agentToken,
           expiresAt: expiresAt.toISOString(),
           expiresInMinutes: 10,
         },

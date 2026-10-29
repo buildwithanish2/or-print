@@ -126,7 +126,7 @@ export const PrintAgentPage: React.FC = () => {
             {/* Code Box */}
             <div className="p-4 rounded-2xl bg-slate-950 border border-purple-500/40 text-center space-y-2">
               <div className="font-mono text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 tracking-wider">
-                {pairingData?.pairingCode || 'ANP-XXXX-XXXX'}
+                {pairingData?.pairingCode || 'ANP-XXXX-XXXX-XXXX-XXXX'}
               </div>
 
               <div className="flex items-center justify-center space-x-1.5 text-[11px] text-amber-400">

@@ -6,9 +6,9 @@ import { DEFAULT_PLATFORM_PRICING_RULES, getCustomerWebUrl } from '@printqr/conf
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import path from 'path';
 import fs from 'fs';
 import { JWT_SECRET } from '../config/secrets';
+import { agentArtifactDownloadHeaders, resolveAgentArtifact } from '../services/agent-artifact.service';
 
 export class AdminController {
   /**
@@ -402,38 +402,13 @@ export class AdminController {
         where: { isLatest: true },
       })) || (await prisma.agentVersion.findFirst({ orderBy: { createdAt: 'desc' } }));
 
-      if (latest) {
-        await prisma.agentVersion.update({
-          where: { id: latest.id },
-          data: { downloadCount: latest.downloadCount + 1 },
-        });
-      }
-
-      // Check for compiled setup installer binary
-      const candidates = [
-        path.join(__dirname, '../../public/downloads/AnishNovaPrintAgent-Setup.exe'),
-        path.join(__dirname, '../../../print-agent/AnishNovaInstaller/bin/Release/net8.0-windows/win-x64/publish/AnishNovaPrintAgent-Setup.exe'),
-        path.join(__dirname, '../../../print-agent/AnishNovaInstaller/bin/Release/net8.0-windows/win-x64/AnishNovaPrintAgent-Setup.exe'),
-        path.join(__dirname, '../../../print-agent/PrintQRAgent/bin/Release/net8.0-windows/win-x64/publish/PrintQRAgent.exe'),
-        path.join(__dirname, '../../../print-agent/AnishNovaInstaller/bin/Debug/net8.0-windows/AnishNovaPrintAgent-Setup.exe'),
-        path.join(__dirname, '../../../print-agent/PrintQRAgent/bin/Debug/net8.0-windows/PrintQRAgent.exe'),
-      ];
-
-      const targetFile = candidates.find((p) => fs.existsSync(p) && fs.statSync(p).size > 1024);
-
-      if (targetFile) {
-        const stat = fs.statSync(targetFile);
-        res.setHeader('Content-Disposition', 'attachment; filename="AnishNovaPrintAgent-Setup.exe"');
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Length', stat.size);
-        res.setHeader('Cache-Control', 'no-cache');
-        return fs.createReadStream(targetFile).pipe(res);
-      }
-
-      return res.status(503).json({
-        success: false,
-        message: 'Windows Print Agent installer binary is not ready. Run dotnet publish for AnishNovaInstaller.',
-      });
+      const artifact = resolveAgentArtifact('installer');
+      if (!artifact) return res.status(503).json({ success: false, message: 'Windows Print Agent installer is temporarily unavailable.' });
+      if (latest) await prisma.agentVersion.update({ where: { id: latest.id }, data: { downloadCount: { increment: 1 } } });
+      Object.entries(agentArtifactDownloadHeaders(artifact.fileSize, 'AnishNovaPrintAgent-Setup.exe')).forEach(([header, value]) => res.setHeader(header, value));
+      const stream = fs.createReadStream(artifact.filePath);
+      stream.on('error', next);
+      return stream.pipe(res);
     } catch (err) {
       next(err);
     }
@@ -444,27 +419,12 @@ export class AdminController {
    */
   static async downloadLatestAgentBinary(req: Request, res: Response, next: NextFunction) {
     try {
-      const candidates = [
-        path.join(__dirname, '../../public/downloads/PrintQRAgent.exe'),
-        path.join(__dirname, '../../../print-agent/PrintQRAgent/bin/Release/net8.0-windows/win-x64/publish/PrintQRAgent.exe'),
-        path.join(__dirname, '../../../print-agent/PrintQRAgent/bin/Release/net8.0-windows/win-x64/PrintQRAgent.exe'),
-      ];
-
-      const targetFile = candidates.find((p) => fs.existsSync(p) && fs.statSync(p).size > 1024);
-
-      if (targetFile) {
-        const stat = fs.statSync(targetFile);
-        res.setHeader('Content-Disposition', 'attachment; filename="PrintQRAgent.exe"');
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Length', stat.size);
-        res.setHeader('Cache-Control', 'no-cache');
-        return fs.createReadStream(targetFile).pipe(res);
-      }
-
-      return res.status(503).json({
-        success: false,
-        message: 'Windows Print Agent binary is not ready. Run dotnet publish for PrintQRAgent.',
-      });
+      const artifact = resolveAgentArtifact('binary');
+      if (!artifact) return res.status(503).json({ success: false, message: 'Windows Print Agent update is temporarily unavailable.' });
+      Object.entries(agentArtifactDownloadHeaders(artifact.fileSize, 'PrintQRAgent.exe')).forEach(([header, value]) => res.setHeader(header, value));
+      const stream = fs.createReadStream(artifact.filePath);
+      stream.on('error', next);
+      return stream.pipe(res);
     } catch (err) {
       next(err);
     }

@@ -24,7 +24,7 @@
   <ItemGroup>
     <Resource Include="assets\app.ico" />
     <EmbeddedResource Include="assets\app.ico" LogicalName="app.ico" />
-    <EmbeddedResource Include="..\PrintQRAgent\bin\Release\net8.0-windows\win-x64\publish\PrintQRAgent.exe" LogicalName="PrintQRAgent.exe" Condition="Exists('..\PrintQRAgent\bin\Release\net8.0-windows\win-x64\publish\PrintQRAgent.exe')" />
+    <EmbeddedResource Include="..\PrintQRAgent\bin\Release\net8.0-windows\win-x64\publish\PrintQRAgent.exe" LogicalName="PrintQRAgent.exe" />
   </ItemGroup>
 
 </Project>

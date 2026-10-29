@@ -1,0 +1,35 @@
+name: Publish Windows Print Agent
+
+on:
+  push:
+    tags:
+      - "agent-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Publish and verify Windows x64 artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^agent-v', ''
+          ./apps/print-agent/publish.ps1 -Version $version
+      - name: Create GitHub release with artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^agent-v', ''
+          gh release create "${{ github.ref_name }}" `
+            "apps/api/public/downloads/AnishNovaPrintAgent-Setup-$version.exe" `
+            "apps/api/public/downloads/PrintQRAgent-$version.exe" `
+            "apps/api/public/downloads/agent-release.json" `
+            --title "AnishNova Print Agent $version" `
+            --notes "Self-contained Windows x64 installer and agent release."

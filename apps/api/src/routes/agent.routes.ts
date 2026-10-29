@@ -7,6 +7,8 @@ const pairingLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, standardHea
 
 // Agent Pairing & Registration (No JWT required - pairing code is the secret)
 router.post('/pair', pairingLimiter, AgentController.pairAgent);
+router.post('/jobs/poll', AgentController.pollPrintJobs);
+router.get('/jobs/:jobId/file', AgentController.downloadPrintJobFile);
 router.post('/printers/sync', AgentController.syncPrinters);
 router.post('/heartbeat', AgentController.agentHeartbeat);
 router.post('/jobs/:jobId/status', AgentController.updateJobStatus);

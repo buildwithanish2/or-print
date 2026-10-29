@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Reflection;
 using System.Threading.Tasks;
 
 namespace PrintQRAgent.Services
@@ -49,7 +50,7 @@ namespace PrintQRAgent.Services
 
     public class UpdateService
     {
-        public const string CurrentVersion = "1.0.0";
+        public static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(60) };
 
         public static async Task<UpdateCheckResult> CheckForUpdatesAsync(string serverUrl)
@@ -165,6 +166,24 @@ namespace PrintQRAgent.Services
                 if (fileInfo.Length < 1024 * 1024)
                 {
                     return (false, "Downloaded update package is incomplete.");
+                }
+
+                if (manifest.FileSize <= 0 || fileInfo.Length != manifest.FileSize || string.IsNullOrWhiteSpace(manifest.Sha256))
+                {
+                    File.Delete(stagedExePath);
+                    return (false, "Downloaded update did not match the release metadata.");
+                }
+
+                await using (var stagedStream = File.OpenRead(stagedExePath))
+                {
+                    var actualHash = Convert.ToHexString(await SHA256.HashDataAsync(stagedStream)).ToLowerInvariant();
+                    if (!CryptographicOperations.FixedTimeEquals(
+                        System.Text.Encoding.ASCII.GetBytes(actualHash),
+                        System.Text.Encoding.ASCII.GetBytes(manifest.Sha256.Trim().ToLowerInvariant())))
+                    {
+                        File.Delete(stagedExePath);
+                        return (false, "Downloaded update failed its integrity check.");
+                    }
                 }
 
                 progressCallback(96, "Preparing atomic in-place restart...");

@@ -157,8 +157,8 @@ namespace PrintQRAgent
             HealthApiText.Text = health.IsApiConnected ? "API: ✓" : "API: ✕";
             HealthApiText.Foreground = health.IsApiConnected ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)) : new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
 
-            HealthWsText.Text = health.IsWebSocketConnected ? "WebSocket: ✓" : "WebSocket: ✕";
-            HealthWsText.Foreground = health.IsWebSocketConnected ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)) : new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
+            HealthWsText.Text = health.IsQueuePolling ? "Job queue: ✓" : "Job queue: ✕";
+            HealthWsText.Foreground = health.IsQueuePolling ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)) : new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
 
             HealthSpoolerText.Text = health.IsSpoolerRunning ? "Spooler: ✓" : "Spooler: ✕";
             HealthSpoolerText.Foreground = health.IsSpoolerRunning ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)) : new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));

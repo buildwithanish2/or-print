@@ -111,7 +111,7 @@ namespace AnishNovaInstaller
                 });
 
                 InstallProgressBar.Value = 60;
-                ProgressStatusText.Text = "Creating Desktop shortcut & Windows startup registration...";
+                ProgressStatusText.Text = "Creating shortcuts and Windows startup registration...";
 
                 // 3. Register Startup Registry Key
                 if (AutoStartCheck.IsChecked == true)
@@ -128,16 +128,19 @@ namespace AnishNovaInstaller
                     }
                 }
 
-                // 4. ALWAYS Create Desktop and Start Menu Shortcuts with Branded Icon
+                // 4. Create a desktop shortcut and optionally add the Start Menu shortcut.
                 try
                 {
                     var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
                     var desktopShortcut = Path.Combine(desktop, "AnishNova Print Agent.lnk");
                     CreateShortcut(targetExePath, desktopShortcut, _targetDir, "AnishNova Print Agent", targetIconPath);
 
-                    var startMenu = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
-                    var startMenuShortcut = Path.Combine(startMenu, "AnishNova Print Agent.lnk");
-                    CreateShortcut(targetExePath, startMenuShortcut, _targetDir, "AnishNova Print Agent - Windows Desktop Spooler", targetIconPath);
+                    if (CreateShortcutCheck.IsChecked == true)
+                    {
+                        var startMenu = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+                        var startMenuShortcut = Path.Combine(startMenu, "AnishNova Print Agent.lnk");
+                        CreateShortcut(targetExePath, startMenuShortcut, _targetDir, "AnishNova Print Agent - Windows Desktop Spooler", targetIconPath);
+                    }
 
                     App.LogInstallerInfo($"Desktop shortcut created with icon at: {desktopShortcut}");
                 }
@@ -156,7 +159,7 @@ namespace AnishNovaInstaller
                         uninstKey.SetValue("DisplayVersion", "1.0.0");
                         uninstKey.SetValue("Publisher", "AnishNova Technologies");
                         uninstKey.SetValue("DisplayIcon", targetExePath);
-                        var uninstCmd = $"cmd.exe /c reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v AnishNovaPrintAgent /f & del \"%USERPROFILE%\\Desktop\\AnishNova Print Agent.lnk\" 2>nul & del \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnishNova Print Agent.lnk\" 2>nul & reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AnishNovaPrintAgent\" /f & rmdir /s /q \"{_targetDir}\"";
+                        var uninstCmd = $"cmd.exe /c reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v AnishNovaPrintAgent /f & del \"%USERPROFILE%\\Desktop\\AnishNova Print Agent.lnk\" 2>nul & del \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnishNova Print Agent.lnk\" 2>nul & del \"%LOCALAPPDATA%\\AnishNovaPrint\\agent-token.bin\" 2>nul & del \"%LOCALAPPDATA%\\AnishNovaPrint\\config.json\" 2>nul & reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AnishNovaPrintAgent\" /f & rmdir /s /q \"{_targetDir}\"";
                         uninstKey.SetValue("UninstallString", uninstCmd);
                     }
                 }

@@ -6,6 +6,7 @@ using System.Drawing.Printing;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using PDFtoImage;
 using PrintQRAgent.Models;
@@ -190,25 +191,58 @@ namespace PrintQRAgent.Services
         public async Task<(bool success, string? error)> PrintDocumentAsync(
             PrintJobPayload job,
             string targetPrinterName,
-            Action<int> progressCallback)
+            string serverUrl,
+            string agentToken,
+            Func<int, Task> progressCallback)
         {
             string tempPath = string.Empty;
             try
             {
-                progressCallback(15);
+                await progressCallback(15);
 
-                // 1. Download file from backend server
-                tempPath = Path.Combine(Path.GetTempPath(), $"printqr_{job.Id}_{Path.GetFileName(job.FileName)}");
-                var response = await _httpClient.GetAsync(job.FileUrl);
+                var allowedMimeTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["application/pdf"] = ".pdf", ["image/png"] = ".png", ["image/jpeg"] = ".jpg"
+                };
+                if (!allowedMimeTypes.TryGetValue(job.MimeType, out var extension)) return (false, "This file type is not supported by the Windows print agent.");
+                if (string.IsNullOrWhiteSpace(agentToken)) return (false, "The agent is not paired with a shop.");
+                if (job.Settings.Copies < 1 || job.Settings.Copies > 100) return (false, "The requested copy count is outside the supported range.");
+
+                // Download only from the configured API host using the per-user protected agent credential.
+                var configuredApi = new Uri(serverUrl);
+                var fileUri = new Uri(job.FileUrl);
+                var secureTransport = fileUri.Scheme == Uri.UriSchemeHttps || (configuredApi.IsLoopback && fileUri.Scheme == Uri.UriSchemeHttp);
+                if (!secureTransport || fileUri.Scheme != configuredApi.Scheme || !string.Equals(fileUri.Host, configuredApi.Host, StringComparison.OrdinalIgnoreCase)
+                    || !fileUri.AbsolutePath.StartsWith("/api/agents/jobs/", StringComparison.Ordinal))
+                    return (false, "The document download URL is outside the configured secure API host.");
+                tempPath = Path.Combine(Path.GetTempPath(), $"printqr_{Guid.NewGuid():N}{extension}");
+                using var request = new HttpRequestMessage(HttpMethod.Get, fileUri);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agentToken);
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                 if (!response.IsSuccessStatusCode)
                 {
                     return (false, $"Failed to download file from server: HTTP {response.StatusCode}");
                 }
 
-                var fileBytes = await response.Content.ReadAsByteArrayAsync();
-                await File.WriteAllBytesAsync(tempPath, fileBytes);
+                const int maximumFileBytes = 50 * 1024 * 1024;
+                if (response.Content.Headers.ContentLength > maximumFileBytes) return (false, "The document exceeds the print agent's file-size limit.");
+                await using (var destination = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                await using (var source = await response.Content.ReadAsStreamAsync())
+                {
+                    var buffer = new byte[81920];
+                    int count;
+                    long total = 0;
+                    while ((count = await source.ReadAsync(buffer)) > 0)
+                    {
+                        total += count;
+                        if (total > maximumFileBytes) return (false, "The document exceeds the print agent's file-size limit.");
+                        await destination.WriteAsync(buffer.AsMemory(0, count));
+                    }
+                }
+                var fileBytes = await File.ReadAllBytesAsync(tempPath);
+                if (!HasExpectedSignature(job.MimeType, fileBytes)) return (false, "The downloaded document contents do not match its declared file type.");
 
-                progressCallback(40);
+                await progressCallback(40);
 
                 var isPdf = job.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
                             (job.MimeType != null && job.MimeType.Contains("pdf", StringComparison.OrdinalIgnoreCase));
@@ -218,15 +252,8 @@ namespace PrintQRAgent.Services
 
                 if (isPdf)
                 {
-                    int totalPdfPages = 1;
-                    try
-                    {
-                        totalPdfPages = Conversion.GetPageCount(fileBytes);
-                    }
-                    catch (Exception ex)
-                    {
-                        LoggerService.LogWarn($"Failed to read PDF page count, defaulting to 1: {ex.Message}");
-                    }
+                    var totalPdfPages = Conversion.GetPageCount(fileBytes);
+                    if (totalPdfPages < 1) return (false, "The PDF has no printable pages.");
 
                     pagesToPrint = ParsePageRange(job.Settings.PageRange, totalPdfPages);
                 }
@@ -235,12 +262,9 @@ namespace PrintQRAgent.Services
                     pagesToPrint.Add(0); // Single page for images
                 }
 
-                if (pagesToPrint.Count == 0)
-                {
-                    pagesToPrint.Add(0);
-                }
+                if (pagesToPrint.Count == 0) return (false, "The selected page range contains no printable pages.");
 
-                progressCallback(60);
+                await progressCallback(60);
 
                 // 3. Configure Windows PrintDocument Spooler
                 using var printDoc = new PrintDocument();
@@ -300,40 +324,17 @@ namespace PrintQRAgent.Services
                     if (isPdf)
                     {
                         int targetPageIndex = pagesToPrint[currentPagePointer];
-                        try
-                        {
-                            // Rasterize page from PDF bytes using PDFtoImage (SkiaSharp engine)
-                            using var skBitmap = Conversion.ToImage(fileBytes, page: targetPageIndex);
-                            if (skBitmap != null)
-                            {
-                                using var image = SKBitmapToGdiImage(skBitmap);
-                                if (image != null)
-                                {
-                                    DrawImageProportional(g, image, printBounds);
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            LoggerService.LogError($"Error rendering PDF page {targetPageIndex + 1}", ex);
-                            g.DrawString($"[Error rendering page {targetPageIndex + 1}: {ex.Message}]",
-                                new Font("Arial", 12), Brushes.Red, printBounds.Left, printBounds.Top);
-                        }
+                        using var skBitmap = Conversion.ToImage(fileBytes, page: targetPageIndex);
+                        if (skBitmap == null) throw new InvalidDataException($"PDF page {targetPageIndex + 1} could not be rendered.");
+                        using var image = SKBitmapToGdiImage(skBitmap);
+                        if (image == null) throw new InvalidDataException($"PDF page {targetPageIndex + 1} could not be converted for printing.");
+                        DrawImageProportional(g, image, printBounds);
                     }
                     else
                     {
                         // Render standard Image file
-                        try
-                        {
-                            using var image = Image.FromFile(tempPath);
-                            DrawImageProportional(g, image, printBounds);
-                        }
-                        catch (Exception ex)
-                        {
-                            LoggerService.LogError("Error rendering image file", ex);
-                            g.DrawString($"[Error rendering image: {ex.Message}]",
-                                new Font("Arial", 12), Brushes.Red, printBounds.Left, printBounds.Top);
-                        }
+                        using var image = Image.FromFile(tempPath);
+                        DrawImageProportional(g, image, printBounds);
                     }
 
                     currentPagePointer++;
@@ -349,13 +350,13 @@ namespace PrintQRAgent.Services
                     }
                 };
 
-                progressCallback(80);
+                await progressCallback(80);
 
                 // Send print job to Windows Print Spooler
                 printDoc.Print();
 
-                progressCallback(100);
-                LoggerService.LogInfo($"Successfully spooled {pagesToPrint.Count} page(s) for job {job.Id} ({job.FileName}) to '{targetPrinterName}'");
+                await progressCallback(90);
+                LoggerService.LogInfo($"Windows spooler accepted {pagesToPrint.Count} page(s) for job {job.Id} ({job.FileName}) at '{targetPrinterName}'. This does not confirm physical completion.");
 
                 return (true, null);
             }
@@ -372,6 +373,14 @@ namespace PrintQRAgent.Services
                     try { File.Delete(tempPath); } catch { }
                 }
             }
+        }
+
+        private static bool HasExpectedSignature(string mimeType, byte[] bytes)
+        {
+            if (mimeType == "application/pdf") return bytes.Length >= 5 && System.Text.Encoding.ASCII.GetString(bytes, 0, 5) == "%PDF-";
+            if (mimeType == "image/png") return bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+            if (mimeType == "image/jpeg") return bytes.Length >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;
+            return false;
         }
 
         /// <summary>
@@ -439,33 +448,27 @@ namespace PrintQRAgent.Services
                 return pages.OrderBy(p => p).ToList();
             }
 
-            var parts = rangeStr.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+            var parts = rangeStr.Split(',');
             foreach (var part in parts)
             {
                 var clean = part.Trim();
+                if (clean.Length == 0) throw new FormatException("Page range contains an empty entry.");
                 if (clean.Contains('-'))
                 {
                     var segs = clean.Split('-');
-                    if (segs.Length == 2 && int.TryParse(segs[0], out int start) && int.TryParse(segs[1], out int end))
-                    {
-                        int from = Math.Max(1, Math.Min(start, end));
-                        int to = Math.Min(totalPages, Math.Max(start, end));
-                        for (int i = from; i <= to; i++)
-                        {
-                            pages.Add(i - 1); // convert to 0-based index
-                        }
-                    }
+                    if (segs.Length != 2 || !int.TryParse(segs[0], out int start) || !int.TryParse(segs[1], out int end) || start < 1 || end < start || end > totalPages)
+                        throw new FormatException("Page range is invalid or outside the document.");
+                    for (int i = start; i <= end; i++) pages.Add(i - 1);
                 }
                 else if (int.TryParse(clean, out int singlePage))
                 {
-                    if (singlePage >= 1 && singlePage <= totalPages)
-                    {
-                        pages.Add(singlePage - 1); // convert to 0-based index
-                    }
+                    if (singlePage < 1 || singlePage > totalPages) throw new FormatException("Selected page is outside the document.");
+                    pages.Add(singlePage - 1);
                 }
+                else throw new FormatException("Page range format is invalid.");
             }
 
-            return pages.Count > 0 ? pages.OrderBy(p => p).ToList() : Enumerable.Range(0, totalPages).ToList();
+            return pages.OrderBy(p => p).ToList();
         }
     }
 }

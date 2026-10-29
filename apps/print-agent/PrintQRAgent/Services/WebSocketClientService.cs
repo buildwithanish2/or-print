@@ -4,6 +4,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using PrintQRAgent.Models;
@@ -64,7 +65,8 @@ namespace PrintQRAgent.Services
                 {
                     IsPaired = isPaired,
                     IsApiConnected = _isApiConnected,
-                    IsWebSocketConnected = _isConnected,
+                    IsWebSocketConnected = false,
+                    IsQueuePolling = _isApiConnected && isPaired,
                     IsSpoolerRunning = spoolerRunning,
                     IsHeartbeatActive = _isApiConnected && isPaired,
                     DiscoveredPrintersCount = printers.Count
@@ -98,12 +100,12 @@ namespace PrintQRAgent.Services
                     using var doc = JsonDocument.Parse(responseBody);
                     var data = doc.RootElement.GetProperty("data");
                     _config.AgentToken = data.GetProperty("agentToken").GetString();
-                    _config.PairingCode = pairingCode;
+                    _config.PairingCode = string.Empty;
                     var shopName = data.TryGetProperty("shopName", out var s) ? s.GetString() : "Shop";
                     _config.ShopName = shopName;
 
                     App.SaveConfig();
-                    LoggerService.LogInfo($"Successfully paired with Shop: {shopName} (Device Token: {_config.AgentToken})");
+                    LoggerService.LogInfo($"Successfully paired with Shop: {shopName}. Agent credential is protected locally.");
 
                     _isApiConnected = true;
                     _ = SyncPrintersAsync();
@@ -175,15 +177,24 @@ namespace PrintQRAgent.Services
             {
                 try
                 {
+                    if (string.IsNullOrWhiteSpace(_config.AgentToken) || _config.AgentToken == "none")
+                    {
+                        _isConnected = false;
+                        _isApiConnected = false;
+                        ConnectionStatusChanged?.Invoke(false, "Waiting for shop pairing");
+                        EmitHealthUpdate();
+                        await Task.Delay(5000, token);
+                        continue;
+                    }
+
                     // 1. Initial printer discovery sync
                     await SyncPrintersAsync();
 
-                    _isConnected = true;
-                    _isApiConnected = true;
-                    ConnectionStatusChanged?.Invoke(true, $"Connected to Cloud Spooler ({_config.ServerUrl})");
+                    _isConnected = _isApiConnected;
+                    ConnectionStatusChanged?.Invoke(_isApiConnected, _isApiConnected ? "Connected to shop print queue" : "API unavailable; retrying shortly");
                     EmitHealthUpdate();
 
-                    while (!token.IsCancellationRequested && _isConnected)
+                    while (!token.IsCancellationRequested)
                     {
                         // 2. Heartbeat to keep agent ONLINE in Admin & Shop dashboards
                         if (!string.IsNullOrEmpty(_config.AgentToken) && _config.AgentToken != "none")
@@ -212,6 +223,9 @@ namespace PrintQRAgent.Services
                             {
                                 _isApiConnected = false;
                             }
+
+                            // Durable queue polling closes the gap where a shop is offline when a payment is approved.
+                            if (_isApiConnected) await PollJobsAsync(token);
                         }
 
                         // 3. Process pending offline queue jobs
@@ -236,53 +250,79 @@ namespace PrintQRAgent.Services
             }
         }
 
+        private async Task PollJobsAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{_config.ServerUrl.TrimEnd('/')}/api/agents/jobs/poll");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.AgentToken);
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _isApiConnected = false;
+                    return;
+                }
+
+                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                if (!document.RootElement.TryGetProperty("data", out var jobs) || jobs.ValueKind != JsonValueKind.Array) return;
+                foreach (var item in jobs.EnumerateArray())
+                {
+                    var job = JsonSerializer.Deserialize<PrintJobPayload>(item.GetRawText());
+                    if (job != null) _queueService.EnqueueJob(job);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (Exception ex) { LoggerService.LogWarn($"Print queue polling failed: {ex.Message}"); }
+        }
+
         public async Task ProcessJobAsync(PrintJobPayload job)
         {
+            if (!_queueService.TryBeginPrint(job.Id, job.IdempotencyKey)) return;
             LoggerService.LogInfo($"Processing print job: {job.OrderNumber} ({job.FileName})");
             JobReceived?.Invoke(job);
             JobProgressUpdated?.Invoke(job.Id, 20, "Downloading document...");
 
-            var targetPrinter = _config.SelectedPrinterName ?? string.Empty;
-            var (success, error) = await _spoolerService.PrintDocumentAsync(job, targetPrinter, (progress) =>
+            var targetPrinter = job.PrinterName;
+            if (!string.IsNullOrWhiteSpace(_config.SelectedPrinterName) && !string.Equals(_config.SelectedPrinterName, job.PrinterName, StringComparison.OrdinalIgnoreCase))
             {
-                JobProgressUpdated?.Invoke(job.Id, progress, progress == 100 ? "COMPLETED" : "PRINTING");
+                await ReportJobStatusAsync(job, "FAILED", 0, "The shop-configured printer does not match this job's assigned printer.");
+                _queueService.MarkJobResolved(job.Id, job.IdempotencyKey);
+                return;
+            }
+
+            await ReportJobStatusAsync(job, "DOWNLOADING", 20, null);
+            var (success, error) = await _spoolerService.PrintDocumentAsync(job, targetPrinter, _config.ServerUrl, _config.AgentToken ?? string.Empty, (progress) =>
+            {
+                JobProgressUpdated?.Invoke(job.Id, progress, progress >= 90 ? "SENT_TO_SPOOLER" : "PRINTING");
+                if (progress >= 80) return ReportJobStatusAsync(job, "PRINTING", 80, null);
+                return Task.CompletedTask;
             });
 
             if (success)
             {
-                _queueService.MarkJobComplete(job.Id, job.IdempotencyKey);
-                JobProgressUpdated?.Invoke(job.Id, 100, "COMPLETED");
-                LoggerService.LogInfo($"Print job completed successfully: {job.OrderNumber}");
-
-                // Notify backend server
-                try
-                {
-                    var statusPayload = new { agentToken = _config.AgentToken, status = "COMPLETED", progressPercent = 100 };
-                    var content = new StringContent(JsonSerializer.Serialize(statusPayload), Encoding.UTF8, "application/json");
-                    await _httpClient.PostAsync($"{_config.ServerUrl}/api/agents/jobs/{job.Id}/status", content);
-                }
-                catch (Exception ex)
-                {
-                    LoggerService.LogWarn($"Failed to notify server of job completion: {ex.Message}");
-                }
+                await ReportJobStatusAsync(job, "SENT_TO_SPOOLER", 90, null);
+                JobProgressUpdated?.Invoke(job.Id, 90, "SENT_TO_SPOOLER");
+                LoggerService.LogInfo($"Print job was accepted by the Windows spooler: {job.OrderNumber}. Physical completion is not confirmed.");
             }
             else
             {
                 JobProgressUpdated?.Invoke(job.Id, 0, $"FAILED: {error}");
                 LoggerService.LogError($"Print job failed: {job.OrderNumber} | Error: {error}");
-
-                // Notify backend server
-                try
-                {
-                    var statusPayload = new { agentToken = _config.AgentToken, status = "FAILED", progressPercent = 0, errorMessage = error };
-                    var content = new StringContent(JsonSerializer.Serialize(statusPayload), Encoding.UTF8, "application/json");
-                    await _httpClient.PostAsync($"{_config.ServerUrl}/api/agents/jobs/{job.Id}/status", content);
-                }
-                catch (Exception ex)
-                {
-                    LoggerService.LogWarn($"Failed to notify server of job failure: {ex.Message}");
-                }
+                await ReportJobStatusAsync(job, "FAILED", 0, error);
             }
+            _queueService.MarkJobResolved(job.Id, job.IdempotencyKey);
+        }
+
+        private async Task ReportJobStatusAsync(PrintJobPayload job, string status, int progress, string? error)
+        {
+            try
+            {
+                var payload = new { agentToken = _config.AgentToken, status, progressPercent = progress, errorMessage = error };
+                using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                using var response = await _httpClient.PostAsync($"{_config.ServerUrl.TrimEnd('/')}/api/agents/jobs/{job.Id}/status", content);
+                if (!response.IsSuccessStatusCode) LoggerService.LogWarn($"Server rejected print-job status update ({(int)response.StatusCode}).");
+            }
+            catch (Exception ex) { LoggerService.LogWarn($"Could not report print-job status: {ex.Message}"); }
         }
     }
 }

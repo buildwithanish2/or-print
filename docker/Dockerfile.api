@@ -16,6 +16,9 @@ RUN npm run build --workspace=packages/validation
 RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
 RUN npm run build --workspace=apps/api
 
+# Windows artifacts are built on a Windows runner and included in the API image.
+RUN node apps/api/scripts/verify-agent-release.cjs
+
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production

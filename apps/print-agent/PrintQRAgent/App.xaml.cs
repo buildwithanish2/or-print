@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Threading;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Forms;
@@ -15,11 +16,21 @@ namespace PrintQRAgent
     {
         private NotifyIcon? _notifyIcon;
         private MainWindow? _mainWindow;
+        private Mutex? _singleInstanceMutex;
         public static AgentConfig Config { get; set; } = new();
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            _singleInstanceMutex = new Mutex(true, "Local\\AnishNovaPrintAgent", out var isFirstInstance);
+            if (!isFirstInstance)
+            {
+                _singleInstanceMutex.Dispose();
+                _singleInstanceMutex = null;
+                Shutdown();
+                return;
+            }
 
             // 1. Setup Global Crash-Proof Exception Handlers
             AppDomain.CurrentDomain.UnhandledException += (s, args) =>
@@ -51,9 +62,9 @@ namespace PrintQRAgent
             _mainWindow = new MainWindow();
 
             // Only run silently in background if a valid paired shop token exists
-            if (!string.IsNullOrEmpty(Config.AgentToken) && Config.AgentToken != "none" && !string.IsNullOrEmpty(Config.PairingCode))
+            if (!string.IsNullOrEmpty(Config.AgentToken) && Config.AgentToken != "none")
             {
-                LoggerService.LogInfo($"Found existing active pairing for shop: {Config.ShopName ?? Config.PairingCode}. Running in System Tray.");
+                LoggerService.LogInfo($"Found existing active pairing{(string.IsNullOrWhiteSpace(Config.ShopName) ? string.Empty : $" for shop {Config.ShopName}")}. Running in System Tray.");
                 _mainWindow.WindowState = WindowState.Minimized;
                 _mainWindow.Hide();
             }
@@ -132,7 +143,19 @@ namespace PrintQRAgent
                 if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
                 var filePath = Path.Combine(dir, "config.json");
-                var json = JsonSerializer.Serialize(Config, new JsonSerializerOptions { WriteIndented = true });
+                AgentCredentialStore.Save(dir, Config.AgentToken);
+                var savedConfig = new AgentConfig
+                {
+                    ServerUrl = Config.ServerUrl,
+                    PairingCode = string.Empty,
+                    AgentToken = null,
+                    ShopId = Config.ShopId,
+                    ShopName = Config.ShopName,
+                    SelectedPrinterName = Config.SelectedPrinterName,
+                    AutoStartWithWindows = Config.AutoStartWithWindows,
+                    MinimizeToTrayOnClose = Config.MinimizeToTrayOnClose
+                };
+                var json = JsonSerializer.Serialize(savedConfig, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(filePath, json);
                 LoggerService.LogInfo("Agent configuration saved successfully.");
             }
@@ -155,7 +178,13 @@ namespace PrintQRAgent
                     if (loaded != null)
                     {
                         Config = loaded;
-                        LoggerService.LogInfo($"Configuration loaded. Server: {Config.ServerUrl}, Pairing: {Config.PairingCode}");
+                        // Older installed releases defaulted to localhost. Migrate that exact default for the production setup.
+                        if (string.Equals(Config.ServerUrl?.TrimEnd('/'), "http://localhost:5000", StringComparison.OrdinalIgnoreCase))
+                            Config.ServerUrl = "https://api.anishnova.com";
+                        Config.AgentToken ??= AgentCredentialStore.Load(Path.GetDirectoryName(filePath)!);
+                        // Migrate credentials from older plaintext configuration to per-user Windows DPAPI storage.
+                        if (!string.IsNullOrWhiteSpace(Config.AgentToken)) SaveConfig();
+                        LoggerService.LogInfo($"Configuration loaded. Server: {Config.ServerUrl}; pairing credentials are redacted.");
                     }
                 }
             }
@@ -195,6 +224,8 @@ namespace PrintQRAgent
         protected override void OnExit(ExitEventArgs e)
         {
             _notifyIcon?.Dispose();
+            _singleInstanceMutex?.ReleaseMutex();
+            _singleInstanceMutex?.Dispose();
             base.OnExit(e);
         }
     }

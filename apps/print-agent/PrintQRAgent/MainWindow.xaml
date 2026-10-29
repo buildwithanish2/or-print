@@ -230,7 +230,7 @@
                     <!-- Telemetry Checks -->
                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                         <TextBlock x:Name="HealthApiText" Text="API: ✓" FontSize="11" Foreground="#10b981" Margin="0,0,12,0"/>
-                        <TextBlock x:Name="HealthWsText" Text="WebSocket: ✓" FontSize="11" Foreground="#10b981" Margin="0,0,12,0"/>
+                        <TextBlock x:Name="HealthWsText" Text="Job queue: ✓" FontSize="11" Foreground="#10b981" Margin="0,0,12,0"/>
                         <TextBlock x:Name="HealthSpoolerText" Text="Spooler: ✓" FontSize="11" Foreground="#10b981" Margin="0,0,12,0"/>
                         <TextBlock x:Name="HealthHeartbeatText" Text="Heartbeat: ✓" FontSize="11" Foreground="#10b981"/>
                     </StackPanel>

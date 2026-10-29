@@ -2,8 +2,20 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
 import { WebSocketService } from '../services/socket.service';
 import { getApiBaseUrl } from '@printqr/config';
+import { agentReleaseMetadata, canAgentReportStatus, canDispatchPrintJob } from '../services/agent-artifact.service';
+import { storageService } from '../services/storage.service';
+import fs from 'fs';
+import { APP_CONFIG } from '@printqr/config';
 
 export class AgentController {
+  private static async authenticateAgent(req: Request) {
+    const authorization = req.get('authorization') || '';
+    const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    const token = bearer || (typeof req.body?.agentToken === 'string' ? req.body.agentToken : '');
+    if (!token) return null;
+    return prisma.printerAgent.findUnique({ where: { agentToken: token } });
+  }
+
   /**
    * Pair Windows Print Agent using Shop Pairing Code
    */
@@ -17,7 +29,7 @@ export class AgentController {
 
       const cleanCode = String(pairingCode).trim().toUpperCase();
 
-      // Find shop by pairing code or fallback to demo shop if standard code
+      // Pairing codes are short-lived and consumed atomically to prevent concurrent reuse.
       const agent = await prisma.printerAgent.findFirst({
         where: {
           expiresAt: { gt: new Date() },
@@ -36,9 +48,8 @@ export class AgentController {
         });
       }
 
-      // Update agent connection status
-      const updatedAgent = await prisma.printerAgent.update({
-        where: { id: agent.id },
+      const consumed = await prisma.printerAgent.updateMany({
+        where: { id: agent.id, expiresAt: { gt: new Date() } },
         data: {
           status: 'CONNECTED',
           deviceName: deviceName || agent.deviceName,
@@ -46,8 +57,10 @@ export class AgentController {
           lastHeartbeat: new Date(),
           expiresAt: new Date(0),
         },
-        include: { shop: true },
       });
+      if (consumed.count !== 1) return res.status(404).json({ success: false, message: 'Invalid or expired Shop Pairing Code. Please generate a new code from the dashboard.' });
+      const updatedAgent = await prisma.printerAgent.findUnique({ where: { id: agent.id }, include: { shop: true } });
+      if (!updatedAgent) return res.status(404).json({ success: false, message: 'Shop pairing could not be completed.' });
 
       return res.status(200).json({
         success: true,
@@ -63,6 +76,89 @@ export class AgentController {
     } catch (err) {
       next(err);
     }
+  }
+
+  /** Authenticated, durable queue claim. Only paid/free eligible jobs for this shop are returned. */
+  static async pollPrintJobs(req: Request, res: Response, next: NextFunction) {
+    try {
+      const agent = await AgentController.authenticateAgent(req);
+      if (!agent) return res.status(401).json({ success: false, message: 'Valid agent credential required' });
+      const jobs = await prisma.printJob.findMany({
+        where: {
+          shopId: agent.shopId,
+          status: 'QUEUED',
+          attempts: { lt: 3 },
+          order: { paymentStatus: { in: ['PAID', 'NOT_REQUIRED'] }, printStatus: { notIn: ['CANCELLED', 'COMPLETED'] } },
+          printer: { shopId: agent.shopId, status: 'ONLINE' },
+        },
+        include: { order: true, orderItem: { include: { file: true } }, printer: true },
+        orderBy: { createdAt: 'asc' },
+        take: 5,
+      });
+
+      const claimed: any[] = [];
+      for (const job of jobs) {
+        if (!job.orderItem.file || job.orderItem.file.sizeBytes > APP_CONFIG.MAX_FILE_SIZE_BYTES
+          || !['application/pdf', 'image/png', 'image/jpeg'].includes(job.orderItem.file.mimeType)
+          || !canDispatchPrintJob({ jobStatus: job.status, paymentStatus: job.order.paymentStatus, printStatus: job.order.printStatus, printerStatus: job.printer.status })) continue;
+
+        const result = await prisma.printJob.updateMany({
+          where: {
+            id: job.id, shopId: agent.shopId, status: 'QUEUED',
+            attempts: { lt: 3 },
+            order: { paymentStatus: { in: ['PAID', 'NOT_REQUIRED'] }, printStatus: { notIn: ['CANCELLED', 'COMPLETED'] } },
+          },
+          data: { status: 'DOWNLOADING', progressPercent: 5, attempts: { increment: 1 }, startedAt: new Date(), errorMessage: null },
+        });
+        if (result.count !== 1) continue;
+        claimed.push({
+          id: job.id, orderId: job.orderId, orderNumber: job.order.orderNumber, orderItemId: job.orderItemId,
+          shopId: job.shopId, printerId: job.printerId, printerName: job.printer.name,
+          fileUrl: `${getApiBaseUrl()}/api/agents/jobs/${encodeURIComponent(job.id)}/file`,
+          fileName: job.orderItem.file.originalName, mimeType: job.orderItem.file.mimeType,
+          settings: {
+            colorMode: job.orderItem.colorMode, paperSize: job.orderItem.paperSize, orientation: job.orderItem.orientation,
+            duplexMode: job.orderItem.duplexMode, copies: job.orderItem.copies, pageRange: job.orderItem.pageRange,
+            pagesPerSheet: job.orderItem.pagesPerSheet, quality: job.orderItem.quality, selectedPagesCount: job.orderItem.selectedPagesCount,
+          },
+          idempotencyKey: job.idempotencyKey, status: 'DOWNLOADING', progressPercent: 5,
+          attempts: job.attempts + 1, maxAttempts: job.maxAttempts, createdAt: job.createdAt.toISOString(),
+        });
+      }
+
+      return res.status(200).json({ success: true, data: claimed });
+    } catch (err) { next(err); }
+  }
+
+  /** Stream only the document belonging to a job claimed by this shop's paired agent. */
+  static async downloadPrintJobFile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const agent = await AgentController.authenticateAgent(req);
+      if (!agent) return res.status(401).json({ success: false, message: 'Valid agent credential required' });
+      const job = await prisma.printJob.findFirst({
+        where: {
+          id: req.params.jobId, shopId: agent.shopId, status: { in: ['DOWNLOADING', 'PRINTING', 'SENT_TO_SPOOLER'] },
+          order: { paymentStatus: { in: ['PAID', 'NOT_REQUIRED'] }, printStatus: { notIn: ['CANCELLED', 'COMPLETED'] } },
+        },
+        include: { orderItem: { include: { file: true } } },
+      });
+      const file = job?.orderItem.file;
+      if (!job || !file || file.sizeBytes > APP_CONFIG.MAX_FILE_SIZE_BYTES || !['application/pdf', 'image/png', 'image/jpeg'].includes(file.mimeType)) {
+        return res.status(404).json({ success: false, message: 'Authorized print document not found.' });
+      }
+      const filePath = storageService.getFilePath(file.storageKey);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, message: 'Authorized print document is unavailable.' });
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile() || stat.size !== file.sizeBytes || stat.size > APP_CONFIG.MAX_FILE_SIZE_BYTES) return res.status(404).json({ success: false, message: 'Authorized print document is unavailable.' });
+      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader('Content-Length', stat.size);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      const stream = fs.createReadStream(filePath);
+      stream.on('error', next);
+      return stream.pipe(res);
+    } catch (err) { next(err); }
   }
 
   /**
@@ -168,24 +264,21 @@ export class AgentController {
   static async getLatestUpdate(req: Request, res: Response, next: NextFunction) {
     try {
       const channel = (req.query.channel as string) || 'stable';
+      const release = agentReleaseMetadata();
+      if (!release) return res.status(503).json({ success: false, message: 'Windows Print Agent update is temporarily unavailable.' });
 
       return res.status(200).json({
         success: true,
         data: {
-          latestVersion: '1.0.0',
-          minimumSupportedVersion: '1.0.0',
-          mandatory: false,
-          releaseDate: '2026-08-23',
+          latestVersion: release.latestVersion,
+          minimumSupportedVersion: release.minimumSupportedVersion,
+          mandatory: release.mandatory,
+          releaseDate: release.releaseDate,
           channel,
-          releaseNotes: [
-            'Official AnishNova Print multi-resolution icon branding',
-            'Automatic background update checker and SHA-256 integrity verification',
-            'Direct Windows Spooler driver integration with zero-latency printing',
-            'Permanent shop QR code identity and secure pairing key masking'
-          ],
-          downloadUrl: `${getApiBaseUrl()}/api/admin/agents/download/latest`,
-          sha256: '3cb0172e90e1f7051df1c750b32948625baebca72e01dfdf68b556bfa0f4e3c1',
-          fileSize: 143235679,
+          releaseNotes: release.releaseNotes,
+          downloadUrl: `${getApiBaseUrl()}/api/admin/agents/download/binary/latest`,
+          sha256: release.binary.sha256,
+          fileSize: release.binary.fileSize,
         },
       });
     } catch (err) {
@@ -200,7 +293,7 @@ export class AgentController {
     try {
       const { jobId } = req.params;
       const { agentToken, status, progressPercent, errorMessage } = req.body;
-      const allowedStatuses = ['DOWNLOADING', 'SENT_TO_SPOOLER', 'PRINTING', 'COMPLETED', 'FAILED'];
+      const allowedStatuses = ['DOWNLOADING', 'SENT_TO_SPOOLER', 'PRINTING', 'FAILED'];
       if (typeof agentToken !== 'string' || !agentToken) {
         return res.status(401).json({ success: false, message: 'Valid agent token required' });
       }
@@ -230,9 +323,13 @@ export class AgentController {
       if (!agent || agent.shopId !== printJob.shopId) {
         return res.status(403).json({ success: false, message: 'Agent is not authorized for this print job' });
       }
+      if (!['PAID', 'NOT_REQUIRED'].includes(printJob.order.paymentStatus) || ['CANCELLED', 'COMPLETED'].includes(printJob.order.printStatus)) {
+        return res.status(409).json({ success: false, message: 'This order is not currently authorized for printing.' });
+      }
       if (['COMPLETED', 'FAILED'].includes(printJob.status)) {
         return res.status(409).json({ success: false, message: 'Print job is already in a terminal state' });
       }
+      if (!canAgentReportStatus(printJob.status, status)) return res.status(409).json({ success: false, message: 'Print job status transition is not valid.' });
 
       const updatedJob = await prisma.printJob.update({
         where: { id: jobId },
@@ -240,7 +337,7 @@ export class AgentController {
           status,
           progressPercent,
           errorMessage: errorMessage || null,
-          completedAt: status === 'COMPLETED' ? new Date() : null,
+          completedAt: null,
         },
       });
 
@@ -249,10 +346,12 @@ export class AgentController {
         where: { orderId: printJob.orderId },
       });
 
+      // The current Windows agent observes only spooler acceptance, not physical completion.
       const allCompleted = allJobs.every((j) => j.status === 'COMPLETED');
       const anyFailed = allJobs.some((j) => j.status === 'FAILED');
+      const allTerminal = allJobs.every((j) => ['COMPLETED', 'FAILED'].includes(j.status));
 
-      const newOrderStatus = allCompleted ? 'COMPLETED' : anyFailed ? 'FAILED' : 'PRINTING';
+      const newOrderStatus = allCompleted ? 'COMPLETED' : allTerminal && anyFailed ? 'FAILED' : ['PRINTING', 'SENT_TO_SPOOLER'].includes(status) ? 'PRINTING' : printJob.order.printStatus;
 
       const updatedOrder = await prisma.order.update({
         where: { id: printJob.orderId },

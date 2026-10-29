@@ -6,7 +6,7 @@ namespace PrintQRAgent.Models
 {
     public class AgentConfig
     {
-        public string ServerUrl { get; set; } = "http://localhost:5000";
+        public string ServerUrl { get; set; } = "https://api.anishnova.com";
         public string PairingCode { get; set; } = string.Empty;
         public string? AgentToken { get; set; }
         public string? ShopId { get; set; }
@@ -138,6 +138,7 @@ namespace PrintQRAgent.Models
         public bool IsPaired { get; set; }
         public bool IsApiConnected { get; set; }
         public bool IsWebSocketConnected { get; set; }
+        public bool IsQueuePolling { get; set; }
         public bool IsSpoolerRunning { get; set; } = true;
         public bool IsHeartbeatActive { get; set; }
         public int DiscoveredPrintersCount { get; set; }

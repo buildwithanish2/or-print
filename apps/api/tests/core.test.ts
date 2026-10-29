@@ -12,6 +12,11 @@ import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
 import { requireAdmin } from '../src/middleware/rbac.middleware';
 import { errorHandler } from '../src/middleware/error.middleware';
+import { agentArtifactDownloadHeaders, agentReleaseMetadata, resolveAgentArtifact, canAgentReportStatus, canDispatchPrintJob } from '../src/services/agent-artifact.service';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { createHash } from 'crypto';
 
 test('internal server errors do not expose Prisma/database details to clients', () => {
   let status = 0;
@@ -32,6 +37,68 @@ test('internal server errors do not expose Prisma/database details to clients', 
   assert.equal(body.message, 'Something went wrong. Please try again.');
   assert.doesNotMatch(JSON.stringify(body), /Institution|main\./);
   assert.equal(body.error, undefined);
+});
+
+test('agent release readiness requires real-sized PE artifacts matching the manifest', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'print-agent-release-'));
+  try {
+    assert.equal(agentReleaseMetadata(directory), null);
+    const installer = Buffer.alloc(1024 * 1024);
+    installer[0] = 0x4d; installer[1] = 0x5a;
+    const binary = Buffer.from(installer);
+    binary[100] = 42;
+    fs.writeFileSync(path.join(directory, 'AnishNovaPrintAgent-Setup.exe'), installer);
+    fs.writeFileSync(path.join(directory, 'PrintQRAgent.exe'), binary);
+    const artifactMeta = (fileName: string, bytes: Buffer) => ({
+      fileName,
+      fileSize: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    });
+    const manifest = {
+      latestVersion: '1.2.3', minimumSupportedVersion: '1.2.3', mandatory: false,
+      releaseDate: '2026-10-29', channel: 'stable', releaseNotes: [],
+      installer: artifactMeta('AnishNovaPrintAgent-Setup.exe', installer),
+      binary: artifactMeta('PrintQRAgent.exe', binary),
+    };
+    fs.writeFileSync(path.join(directory, 'agent-release.json'), JSON.stringify(manifest));
+
+    assert.equal(agentReleaseMetadata(directory)?.latestVersion, '1.2.3');
+    assert.equal(resolveAgentArtifact('installer', directory)?.fileSize, installer.length);
+
+    fs.appendFileSync(path.join(directory, 'PrintQRAgent.exe'), Buffer.from([1]));
+    assert.equal(resolveAgentArtifact('binary', directory), null);
+    assert.equal(agentReleaseMetadata(directory), null);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('agent downloads use executable attachment headers with verified byte length', () => {
+  assert.deepEqual(agentArtifactDownloadHeaders(1234567, 'AnishNovaPrintAgent-Setup.exe'), {
+    'Content-Disposition': 'attachment; filename="AnishNovaPrintAgent-Setup.exe"',
+    'Content-Type': 'application/vnd.microsoft.portable-executable',
+    'Content-Length': 1234567,
+    'Cache-Control': 'public, max-age=300',
+    'X-Content-Type-Options': 'nosniff',
+  });
+});
+
+test('agent queue dispatch requires a queued job, paid/free order, active print state, and online printer', () => {
+  const base = { jobStatus: 'QUEUED', paymentStatus: 'PAID', printStatus: 'QUEUED', printerStatus: 'ONLINE' };
+  assert.equal(canDispatchPrintJob(base), true);
+  assert.equal(canDispatchPrintJob({ ...base, paymentStatus: 'PAYMENT_SUBMITTED' }), false);
+  assert.equal(canDispatchPrintJob({ ...base, paymentStatus: 'CASH_ON_COUNTER' }), false);
+  assert.equal(canDispatchPrintJob({ ...base, printStatus: 'CANCELLED' }), false);
+  assert.equal(canDispatchPrintJob({ ...base, printerStatus: 'OFFLINE' }), false);
+  assert.equal(canDispatchPrintJob({ ...base, jobStatus: 'PRINTING' }), false);
+});
+
+test('agent status transitions stop at spooler acceptance until physical completion can be verified', () => {
+  assert.equal(canAgentReportStatus('DOWNLOADING', 'PRINTING'), true);
+  assert.equal(canAgentReportStatus('PRINTING', 'SENT_TO_SPOOLER'), true);
+  assert.equal(canAgentReportStatus('SENT_TO_SPOOLER', 'COMPLETED'), false);
+  assert.equal(canAgentReportStatus('SENT_TO_SPOOLER', 'FAILED'), true);
+  assert.equal(canAgentReportStatus('FAILED', 'PRINTING'), false);
 });
 
 test('page range parser counts ALL pages', () => {

@@ -172,7 +172,8 @@ export class WebSocketService {
           const agentId = (socket as any).agentId;
           const shopId = (socket as any).shopId;
           if (!agentId || !shopId) return;
-          if (!['DOWNLOADING', 'SENT_TO_SPOOLER', 'PRINTING', 'COMPLETED', 'FAILED'].includes(payload.status)) return;
+          // This agent can report successful spooler submission but cannot confirm paper output.
+          if (!['DOWNLOADING', 'SENT_TO_SPOOLER', 'PRINTING', 'FAILED'].includes(payload.status)) return;
           if (!Number.isInteger(payload.progress) || payload.progress < 0 || payload.progress > 100) return;
           const job = await prisma.printJob.findUnique({
             where: { id: payload.jobId },

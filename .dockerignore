@@ -1,0 +1,16 @@
+.git
+node_modules
+**/node_modules
+**/bin
+**/obj
+.env
+.env.*
+!.env.example
+uploads
+private-college-evidence
+*.sqlite
+*.sqlite-journal
+*.db
+*.db-journal
+*.bak
+*.log
