@@ -10,6 +10,7 @@ import { AuthController } from '../src/controllers/auth.controller';
 import { OrderController } from '../src/controllers/order.controller';
 import { PaymentController } from '../src/controllers/payment.controller';
 import { ShopController } from '../src/controllers/shop.controller';
+import { AgentController } from '../src/controllers/agent.controller';
 import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
 import { requireAdmin } from '../src/middleware/rbac.middleware';
@@ -858,4 +859,55 @@ test('guest ID photo review is restricted to the owning shop owner', () => {
   assert.equal(canShopOwnerReviewGuestId('SHOP_OWNER', 'shop-a', 'shop-b'), false);
   assert.equal(canShopOwnerReviewGuestId('SHOP_STAFF', 'shop-a', 'shop-a'), false);
   assert.equal(canShopOwnerReviewGuestId('ADMIN', null, 'shop-a'), false);
+});
+
+test('print-agent heartbeat accepts a valid bearer credential and scopes update by agent id', async () => {
+  const db = prisma as any;
+  const originalFindUnique = db.printerAgent.findUnique;
+  const originalUpdateMany = db.printerAgent.updateMany;
+  let updated: any;
+  try {
+    db.printerAgent.findUnique = async ({ where }: any) => where.agentToken === 'test-agent-credential'
+      ? { id: 'agent-123', shopId: 'shop-123' }
+      : null;
+    db.printerAgent.updateMany = async (args: any) => { updated = args; return { count: 1 }; };
+    let statusCode = 0;
+    let body: any;
+    const req: any = {
+      body: { status: 'CONNECTED' },
+      get: (name: string) => name.toLowerCase() === 'authorization' ? 'Bearer test-agent-credential' : undefined,
+    };
+    const res: any = {
+      status(code: number) { statusCode = code; return this; },
+      json(value: any) { body = value; return this; },
+    };
+
+    await AgentController.agentHeartbeat(req, res, (error: unknown) => { throw error; });
+
+    assert.equal(statusCode, 200);
+    assert.equal(body.success, true);
+    assert.deepEqual(updated.where, { id: 'agent-123' });
+    assert.equal(updated.data.status, 'CONNECTED');
+    assert.ok(updated.data.lastHeartbeat instanceof Date);
+  } finally {
+    db.printerAgent.findUnique = originalFindUnique;
+    db.printerAgent.updateMany = originalUpdateMany;
+  }
+});
+
+test('print-agent heartbeat rejects missing bearer credentials', async () => {
+  const db = prisma as any;
+  const originalFindUnique = db.printerAgent.findUnique;
+  try {
+    db.printerAgent.findUnique = async () => null;
+    let statusCode = 0;
+    const req: any = { body: { status: 'CONNECTED' }, get: () => undefined };
+    const res: any = { status(code: number) { statusCode = code; return this; }, json() { return this; } };
+
+    await AgentController.agentHeartbeat(req, res, (error: unknown) => { throw error; });
+
+    assert.equal(statusCode, 401);
+  } finally {
+    db.printerAgent.findUnique = originalFindUnique;
+  }
 });

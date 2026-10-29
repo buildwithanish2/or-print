@@ -127,6 +127,19 @@ namespace AnishNovaInstaller
                         App.LogInstallerError("Failed to set startup registry key", ex);
                     }
                 }
+                else
+                {
+                    // Keep upgrades predictable: disabling auto-start removes an older Run entry.
+                    try
+                    {
+                        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                        key?.DeleteValue("AnishNovaPrintAgent", false);
+                    }
+                    catch (Exception ex)
+                    {
+                        App.LogInstallerError("Failed to remove the previous startup registration", ex);
+                    }
+                }
 
                 // 4. Create a desktop shortcut and optionally add the Start Menu shortcut.
                 try

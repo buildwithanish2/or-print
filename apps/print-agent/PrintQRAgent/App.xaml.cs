@@ -16,18 +16,19 @@ namespace PrintQRAgent
     {
         private NotifyIcon? _notifyIcon;
         private MainWindow? _mainWindow;
-        private Mutex? _singleInstanceMutex;
+        private SingleInstanceCoordinator? _singleInstance;
         public static AgentConfig Config { get; set; } = new();
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
-            _singleInstanceMutex = new Mutex(true, "Local\\AnishNovaPrintAgent", out var isFirstInstance);
-            if (!isFirstInstance)
+            _singleInstance = new SingleInstanceCoordinator("AnishNovaPrintAgent", () =>
             {
-                _singleInstanceMutex.Dispose();
-                _singleInstanceMutex = null;
+                Dispatcher.BeginInvoke(new Action(ShowDashboard));
+            });
+            if (!_singleInstance.IsPrimaryInstance)
+            {
                 Shutdown();
                 return;
             }
@@ -134,7 +135,7 @@ namespace PrintQRAgent
             _mainWindow.Activate();
         }
 
-        public static void SaveConfig()
+        public static bool SaveConfig()
         {
             try
             {
@@ -151,6 +152,7 @@ namespace PrintQRAgent
                     AgentToken = null,
                     ShopId = Config.ShopId,
                     ShopName = Config.ShopName,
+                    DeviceName = Config.DeviceName,
                     SelectedPrinterName = Config.SelectedPrinterName,
                     AutoStartWithWindows = Config.AutoStartWithWindows,
                     MinimizeToTrayOnClose = Config.MinimizeToTrayOnClose
@@ -158,10 +160,12 @@ namespace PrintQRAgent
                 var json = JsonSerializer.Serialize(savedConfig, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(filePath, json);
                 LoggerService.LogInfo("Agent configuration saved successfully.");
+                return true;
             }
             catch (Exception ex)
             {
                 LoggerService.LogError("Failed to save config.json", ex);
+                return false;
             }
         }
 
@@ -178,9 +182,9 @@ namespace PrintQRAgent
                     if (loaded != null)
                     {
                         Config = loaded;
-                        // Older installed releases defaulted to localhost. Migrate that exact default for the production setup.
-                        if (string.Equals(Config.ServerUrl?.TrimEnd('/'), "http://localhost:5000", StringComparison.OrdinalIgnoreCase))
-                            Config.ServerUrl = "https://api.anishnova.com";
+                        // The agent does not run a local API. Normalize stale localhost URLs,
+                        // legacy /api suffixes, and malformed values to a safe cloud API base.
+                        Config.ServerUrl = AgentApiEndpoint.NormalizeServerUrl(Config.ServerUrl);
                         Config.AgentToken ??= AgentCredentialStore.Load(Path.GetDirectoryName(filePath)!);
                         // Migrate credentials from older plaintext configuration to per-user Windows DPAPI storage.
                         if (!string.IsNullOrWhiteSpace(Config.AgentToken)) SaveConfig();
@@ -224,8 +228,7 @@ namespace PrintQRAgent
         protected override void OnExit(ExitEventArgs e)
         {
             _notifyIcon?.Dispose();
-            _singleInstanceMutex?.ReleaseMutex();
-            _singleInstanceMutex?.Dispose();
+            _singleInstance?.Dispose();
             base.OnExit(e);
         }
     }

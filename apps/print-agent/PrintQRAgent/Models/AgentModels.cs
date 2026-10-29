@@ -6,11 +6,12 @@ namespace PrintQRAgent.Models
 {
     public class AgentConfig
     {
-        public string ServerUrl { get; set; } = "https://api.anishnova.com";
+        public string ServerUrl { get; set; } = PrintQRAgent.Services.AgentApiEndpoint.ProductionServerUrl;
         public string PairingCode { get; set; } = string.Empty;
         public string? AgentToken { get; set; }
         public string? ShopId { get; set; }
         public string? ShopName { get; set; }
+        public string? DeviceName { get; set; }
         public string? SelectedPrinterName { get; set; }
         public bool AutoStartWithWindows { get; set; } = true;
         public bool MinimizeToTrayOnClose { get; set; } = true;

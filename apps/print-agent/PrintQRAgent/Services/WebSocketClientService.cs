@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using PrintQRAgent.Models;
@@ -20,6 +18,9 @@ namespace PrintQRAgent.Services
         private CancellationTokenSource? _cts;
         private bool _isConnected;
         private bool _isApiConnected;
+        private bool _isHeartbeatActive;
+        private readonly AgentPairingClient _pairingClient;
+        private readonly AgentHeartbeatClient _heartbeatClient;
 
         public event Action<bool, string>? ConnectionStatusChanged;
         public event Action<HealthState>? HealthUpdated;
@@ -32,9 +33,12 @@ namespace PrintQRAgent.Services
         public WebSocketClientService(AgentConfig config, PrintSpoolerService spoolerService, OfflineQueueService queueService)
         {
             _config = config;
+            _config.ServerUrl = AgentApiEndpoint.NormalizeServerUrl(_config.ServerUrl);
             _spoolerService = spoolerService;
             _queueService = queueService;
             _httpClient.Timeout = TimeSpan.FromSeconds(10);
+            _pairingClient = new AgentPairingClient(_config, _httpClient, App.SaveConfig);
+            _heartbeatClient = new AgentHeartbeatClient(_httpClient, _config);
         }
 
         public void Start()
@@ -49,6 +53,7 @@ namespace PrintQRAgent.Services
             _cts?.Cancel();
             _isConnected = false;
             _isApiConnected = false;
+            _isHeartbeatActive = false;
             ConnectionStatusChanged?.Invoke(false, "Agent daemon stopped");
             EmitHealthUpdate();
         }
@@ -68,7 +73,7 @@ namespace PrintQRAgent.Services
                     IsWebSocketConnected = false,
                     IsQueuePolling = _isApiConnected && isPaired,
                     IsSpoolerRunning = spoolerRunning,
-                    IsHeartbeatActive = _isApiConnected && isPaired,
+                    IsHeartbeatActive = _isHeartbeatActive && isPaired,
                     DiscoveredPrintersCount = printers.Count
                 });
             }
@@ -82,48 +87,19 @@ namespace PrintQRAgent.Services
         {
             try
             {
-                var payload = new
-                {
-                    pairingCode = pairingCode.Trim().ToUpper(),
-                    deviceName = Environment.MachineName,
-                    platform = "windows-x64",
-                    agentVersion = "1.0.0"
-                };
+                var result = await _pairingClient.PairAsync(pairingCode);
+                if (!result.success) return result;
 
-                var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync($"{_config.ServerUrl}/api/agents/pair", content);
-                var responseBody = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    using var doc = JsonDocument.Parse(responseBody);
-                    var data = doc.RootElement.GetProperty("data");
-                    _config.AgentToken = data.GetProperty("agentToken").GetString();
-                    _config.PairingCode = string.Empty;
-                    var shopName = data.TryGetProperty("shopName", out var s) ? s.GetString() : "Shop";
-                    _config.ShopName = shopName;
-
-                    App.SaveConfig();
-                    LoggerService.LogInfo($"Successfully paired with Shop: {shopName}. Agent credential is protected locally.");
-
-                    _isApiConnected = true;
-                    _ = SyncPrintersAsync();
-                    EmitHealthUpdate();
-
-                    return (true, $"Agent activated successfully for {shopName}!", shopName);
-                }
-                else
-                {
-                    using var doc = JsonDocument.Parse(responseBody);
-                    var msg = doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Pairing failed";
-                    return (false, msg ?? "Invalid pairing code", null);
-                }
+                LoggerService.LogInfo($"Successfully paired with Shop: {result.shopName}. Agent credential is protected locally.");
+                _isApiConnected = true;
+                _ = SyncPrintersAsync();
+                EmitHealthUpdate();
+                return result;
             }
             catch (Exception ex)
             {
-                LoggerService.LogError("Pairing request exception", ex);
-                return (false, $"Connection error: {ex.Message}", null);
+                LoggerService.LogWarn($"Pairing request failed ({ex.GetType().Name}). The pairing code and credential were not logged.");
+                return (false, "Could not reach the configured AnishNova Print API. Check this computer's internet connection and try again.", null);
             }
         }
 
@@ -140,15 +116,10 @@ namespace PrintQRAgent.Services
             try
             {
                 var printers = _spoolerService.GetInstalledPrinters();
-                var payload = new
-                {
-                    agentToken = _config.AgentToken,
-                    printers
-                };
-
-                var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync($"{_config.ServerUrl}/api/agents/printers/sync", content);
+                using var request = AgentApiEndpoint.CreateAuthenticatedRequest(
+                    HttpMethod.Post, _config.ServerUrl, "agents/printers/sync", _config.AgentToken);
+                request.Content = new StringContent(JsonSerializer.Serialize(new { printers }), Encoding.UTF8, "application/json");
+                using var response = await _httpClient.SendAsync(request);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -173,6 +144,7 @@ namespace PrintQRAgent.Services
 
         private async Task RunConnectionLoopAsync(CancellationToken token)
         {
+            var consecutiveHeartbeatFailures = 0;
             while (!token.IsCancellationRequested)
             {
                 try
@@ -202,26 +174,31 @@ namespace PrintQRAgent.Services
                             try
                             {
                                 var printers = _spoolerService.GetInstalledPrinters();
-                                var heartbeatPayload = new
+                                var result = await _heartbeatClient.SendAsync(_config.AgentToken, printers.Count, token);
+                                _isHeartbeatActive = result.success;
+                                _isApiConnected = result.success;
+                                if (result.success)
                                 {
-                                    agentToken = _config.AgentToken,
-                                    status = "CONNECTED",
-                                    printerCount = printers.Count,
-                                    version = "1.0.0",
-                                    deviceName = Environment.MachineName
-                                };
-
-                                var heartbeatContent = new StringContent(
-                                    JsonSerializer.Serialize(heartbeatPayload),
-                                    Encoding.UTF8,
-                                    "application/json"
-                                );
-                                var res = await _httpClient.PostAsync($"{_config.ServerUrl}/api/agents/heartbeat", heartbeatContent, token);
-                                _isApiConnected = res.IsSuccessStatusCode;
+                                    consecutiveHeartbeatFailures = 0;
+                                }
+                                else
+                                {
+                                    consecutiveHeartbeatFailures++;
+                                    ConnectionStatusChanged?.Invoke(false, result.message);
+                                    LoggerService.LogWarn(result.message);
+                                }
                             }
-                            catch
+                            catch (OperationCanceledException) when (token.IsCancellationRequested)
                             {
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                consecutiveHeartbeatFailures++;
+                                _isHeartbeatActive = false;
                                 _isApiConnected = false;
+                                ConnectionStatusChanged?.Invoke(false, "Heartbeat could not reach the configured API. Retrying.");
+                                LoggerService.LogWarn($"Heartbeat attempt failed ({ex.GetType().Name}); retry scheduled.");
                             }
 
                             // Durable queue polling closes the gap where a shop is offline when a payment is approved.
@@ -235,7 +212,10 @@ namespace PrintQRAgent.Services
                         }
 
                         EmitHealthUpdate();
-                        await Task.Delay(15000, token); // 15-second heartbeat interval
+                        var retrySeconds = consecutiveHeartbeatFailures == 0
+                            ? 15
+                            : Math.Min(60, 5 * (1 << Math.Min(consecutiveHeartbeatFailures - 1, 4)));
+                        await Task.Delay(TimeSpan.FromSeconds(retrySeconds), token);
                     }
                 }
                 catch (Exception ex)
@@ -254,8 +234,8 @@ namespace PrintQRAgent.Services
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, $"{_config.ServerUrl.TrimEnd('/')}/api/agents/jobs/poll");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.AgentToken);
+                using var request = AgentApiEndpoint.CreateAuthenticatedRequest(
+                    HttpMethod.Post, _config.ServerUrl, "agents/jobs/poll", _config.AgentToken ?? string.Empty);
                 using var response = await _httpClient.SendAsync(request, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -291,7 +271,7 @@ namespace PrintQRAgent.Services
             }
 
             await ReportJobStatusAsync(job, "DOWNLOADING", 20, null);
-            var (success, error) = await _spoolerService.PrintDocumentAsync(job, targetPrinter, _config.ServerUrl, _config.AgentToken ?? string.Empty, (progress) =>
+            var (success, error) = await _spoolerService.PrintDocumentAsync(job, targetPrinter, AgentApiEndpoint.NormalizeServerUrl(_config.ServerUrl), _config.AgentToken ?? string.Empty, (progress) =>
             {
                 JobProgressUpdated?.Invoke(job.Id, progress, progress >= 90 ? "SENT_TO_SPOOLER" : "PRINTING");
                 if (progress >= 80) return ReportJobStatusAsync(job, "PRINTING", 80, null);
@@ -317,9 +297,10 @@ namespace PrintQRAgent.Services
         {
             try
             {
-                var payload = new { agentToken = _config.AgentToken, status, progressPercent = progress, errorMessage = error };
-                using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-                using var response = await _httpClient.PostAsync($"{_config.ServerUrl.TrimEnd('/')}/api/agents/jobs/{job.Id}/status", content);
+                using var request = AgentApiEndpoint.CreateAuthenticatedRequest(
+                    HttpMethod.Post, _config.ServerUrl, $"agents/jobs/{Uri.EscapeDataString(job.Id)}/status", _config.AgentToken ?? string.Empty);
+                request.Content = new StringContent(JsonSerializer.Serialize(new { status, progressPercent = progress, errorMessage = error }), Encoding.UTF8, "application/json");
+                using var response = await _httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode) LoggerService.LogWarn($"Server rejected print-job status update ({(int)response.StatusCode}).");
             }
             catch (Exception ex) { LoggerService.LogWarn($"Could not report print-job status: {ex.Message}"); }

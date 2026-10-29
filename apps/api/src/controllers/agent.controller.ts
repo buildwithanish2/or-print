@@ -166,15 +166,13 @@ export class AgentController {
    */
   static async syncPrinters(req: Request, res: Response, next: NextFunction) {
     try {
-      const { agentToken, printers } = req.body;
+      const { printers } = req.body;
 
       if (!Array.isArray(printers)) {
         return res.status(400).json({ success: false, message: 'Printers array is required' });
       }
 
-      const agent = typeof agentToken === 'string'
-        ? await prisma.printerAgent.findUnique({ where: { agentToken } })
-        : null;
+      const agent = await AgentController.authenticateAgent(req);
       if (!agent) {
         return res.status(401).json({ success: false, message: 'Valid agent token required' });
       }
@@ -239,8 +237,9 @@ export class AgentController {
    */
   static async agentHeartbeat(req: Request, res: Response, next: NextFunction) {
     try {
-      const { agentToken, status } = req.body;
-      if (typeof agentToken !== 'string' || !agentToken) {
+      const { status } = req.body;
+      const agent = await AgentController.authenticateAgent(req);
+      if (!agent) {
         return res.status(401).json({ success: false, message: 'Valid agent token required' });
       }
       const acceptedStatuses = ['CONNECTED', 'DISCONNECTED'];
@@ -248,7 +247,7 @@ export class AgentController {
         return res.status(400).json({ success: false, message: 'Invalid agent status' });
       }
       const result = await prisma.printerAgent.updateMany({
-        where: { agentToken },
+        where: { id: agent.id },
         data: { status: status || 'CONNECTED', lastHeartbeat: new Date() },
       });
       if (!result.count) return res.status(401).json({ success: false, message: 'Invalid agent token' });
@@ -292,9 +291,10 @@ export class AgentController {
   static async updateJobStatus(req: Request, res: Response, next: NextFunction) {
     try {
       const { jobId } = req.params;
-      const { agentToken, status, progressPercent, errorMessage } = req.body;
+      const { status, progressPercent, errorMessage } = req.body;
       const allowedStatuses = ['DOWNLOADING', 'SENT_TO_SPOOLER', 'PRINTING', 'FAILED'];
-      if (typeof agentToken !== 'string' || !agentToken) {
+      const agent = await AgentController.authenticateAgent(req);
+      if (!agent) {
         return res.status(401).json({ success: false, message: 'Valid agent token required' });
       }
       if (!allowedStatuses.includes(status)) {
@@ -319,8 +319,7 @@ export class AgentController {
       if (!printJob) {
         return res.status(404).json({ success: false, message: 'Print job not found' });
       }
-      const agent = await prisma.printerAgent.findUnique({ where: { agentToken } });
-      if (!agent || agent.shopId !== printJob.shopId) {
+      if (agent.shopId !== printJob.shopId) {
         return res.status(403).json({ success: false, message: 'Agent is not authorized for this print job' });
       }
       if (!['PAID', 'NOT_REQUIRED'].includes(printJob.order.paymentStatus) || ['CANCELLED', 'COMPLETED'].includes(printJob.order.printStatus)) {

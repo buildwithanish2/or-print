@@ -390,7 +390,7 @@ namespace PrintQRAgent
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "http://localhost:5174",
+                    FileName = "https://shop-dashboard-one-eosin.vercel.app/login",
                     UseShellExecute = true
                 });
             }

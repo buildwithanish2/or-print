@@ -57,7 +57,7 @@ namespace PrintQRAgent.Services
         {
             try
             {
-                var endpoint = $"{serverUrl.TrimEnd('/')}/api/agents/update/latest";
+                var endpoint = AgentApiEndpoint.BuildApiUri(serverUrl, "agents/update/latest");
                 var response = await _httpClient.GetAsync(endpoint);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -131,7 +131,7 @@ namespace PrintQRAgent.Services
                 var downloadUrl = manifest.DownloadUrl;
                 if (string.IsNullOrEmpty(downloadUrl))
                 {
-                    downloadUrl = $"{App.Config.ServerUrl.TrimEnd('/')}/api/admin/agents/download/binary/latest";
+                    downloadUrl = AgentApiEndpoint.BuildApiUri(App.Config.ServerUrl, "admin/agents/download/binary/latest").AbsoluteUri;
                 }
 
                 LoggerService.LogInfo($"Downloading in-place update from: {downloadUrl}");
