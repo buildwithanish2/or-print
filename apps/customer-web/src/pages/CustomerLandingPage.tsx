@@ -168,7 +168,13 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
       setCheckoutError(null);
       onOrderCreated(orderNumber, trackingToken);
       return true;
-    } catch {
+    } catch (error) {
+      // Temporary production-safe diagnostic: never log order references or tracking tokens.
+      console.warn('[checkout-tracking] preflight failed', {
+        status: error instanceof ApiRequestError ? error.status : undefined,
+        orderReferencePresent: Boolean(orderNumber),
+        trackingTokenPresent: Boolean(trackingToken),
+      });
       setPendingTracking({ orderNumber, trackingToken });
       setCheckoutError('Your order was created, but tracking is not available yet. Retry tracking below; your order will not be submitted again.');
       return false;

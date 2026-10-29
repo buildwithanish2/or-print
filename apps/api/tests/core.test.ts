@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { PricingEngineService } from '../src/services/pricing.service';
 import { CreateOrderSchema, LoginSchema, ShopRegistrationSchema } from '../../../packages/validation/src/index';
 import crypto from 'crypto';
-import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment, decryptPaymentCredentialWithKey, encryptPaymentCredentialWithKey, isValidUpiVpa, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../src/services/payment.service';
+import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment, decryptPaymentCredentialWithKey, encryptPaymentCredentialWithKey, isValidUpiVpa, PaymentGatewayService, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../src/services/payment.service';
 import { canReserveFreePrintAllowance, canShopOwnerReviewGuestId, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../src/services/free-print.service';
 import { AuthController } from '../src/controllers/auth.controller';
 import { OrderController } from '../src/controllers/order.controller';
@@ -141,6 +141,77 @@ test('free-print order creation returns identifiers that the tracking endpoint r
     db.institution.findUnique = original.institutionFindUnique;
     db.freePrintUsage.findUnique = original.usageFindUnique;
     db.$transaction = original.transaction;
+  }
+});
+
+test('manual UPI checkout persists a pending order that tracks with returned identifiers', async () => {
+  const fileId = '30000000-0000-4000-8000-000000000001';
+  const file: any = { id: fileId, expiresAt: new Date(Date.now() + 60_000), shopId: 'shop-upi', originalName: 'notes.pdf', pageCount: 4, mimeType: 'application/pdf', sizeBytes: 4096, url: '/files/notes.pdf', category: 'DOCUMENT' };
+  const printer: any = { id: 'printer-upi', isDefault: true, status: 'ONLINE', supportsColor: false, supportsDuplex: false, supportedSizes: 'A4' };
+  const stored: any = { items: [], printJobs: [], payments: [] };
+  const db = prisma as any;
+  const originals = {
+    orderFindUnique: db.order.findUnique,
+    shopFindUnique: db.shop.findUnique,
+    fileFindUnique: db.fileRecord.findUnique,
+    gatewayFindFirst: db.paymentGatewayConfig.findFirst,
+    transaction: db.$transaction,
+    itemPrice: PricingEngineService.calculateItemPrice,
+    orderTotal: PricingEngineService.calculateOrderTotal,
+    paymentInit: PaymentGatewayService.initializeOrderPayment,
+  };
+  const tx: any = {
+    order: { create: async ({ data }: any) => Object.assign(stored, data, { id: 'order-upi-1' }) },
+    orderItem: { create: async ({ data }: any) => { const item = { ...data, id: 'item-upi-1', file }; stored.items.push(item); return item; } },
+    printJob: { create: async ({ data }: any) => { const job = { ...data, id: 'job-upi-1', attempts: 0, maxAttempts: 3, createdAt: new Date() }; stored.printJobs.push(job); return job; } },
+  };
+  const makeResponse = () => ({ statusCode: 200, body: undefined as any, status(code: number) { this.statusCode = code; return this; }, json(body: any) { this.body = body; return this; } });
+
+  try {
+    db.order.findUnique = async ({ where }: any) => {
+      if (where.idempotencyKey) return null;
+      if (where.orderNumber === stored.orderNumber) return { ...stored, shop: { id: 'shop-upi', name: 'UPI Test Shop', slug: 'upi-test-shop', phone: null, address: null, logoUrl: null }, items: stored.items, printJobs: stored.printJobs, payments: [] };
+      return null;
+    };
+    db.shop.findUnique = async () => ({ id: 'shop-upi', name: 'UPI Test Shop', slug: 'upi-test-shop', status: 'ACTIVE', isOnline: true, printers: [printer] });
+    db.fileRecord.findUnique = async () => file;
+    db.paymentGatewayConfig.findFirst = async () => ({ isEnabled: true, upiVpa: 'shop@upi' });
+    db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
+    PricingEngineService.calculateItemPrice = async () => ({ fileId, fileName: file.originalName, pageCount: 4, selectedPages: 4, copies: 1, effectiveSheets: 4, unitPricePerPage: 2.5, basePrice: 10, duplexDiscount: 0, bulkDiscount: 0, itemTotal: 10 });
+    PricingEngineService.calculateOrderTotal = async (items: any[]) => ({ items, subtotal: 10, totalDiscount: 0, serviceFee: 1, gstRatePercent: 0, gstAmount: 0, finalTotal: 11 });
+    PaymentGatewayService.initializeOrderPayment = async (_id: string, _number: string, amount: number, method: string) => {
+      assert.equal(method, 'UPI');
+      return { gateway: 'UPI_DIRECT', paymentId: 'pending-upi-payment', amount, currency: 'INR', status: 'PENDING' } as any;
+    };
+
+    const requestBody: any = { shopSlug: 'upi-test-shop', idempotencyKey: 'manual-upi-checkout-test-key', paymentMethod: 'UPI', items: [{ fileId, settings: { colorMode: 'BW', paperSize: 'A4', orientation: 'PORTRAIT', duplexMode: 'SIMPLEX', copies: 1, pageRange: 'ALL', pagesPerSheet: 1, quality: 'NORMAL' } }] };
+    const createResponse = makeResponse();
+    let createError: unknown;
+    await OrderController.createOrder({ body: requestBody, get: () => undefined } as any, createResponse as any, (error: unknown) => { createError = error; });
+    assert.equal(createError, undefined);
+    assert.equal(createResponse.statusCode, 201);
+    assert.equal(createResponse.body.data.payment.status, 'PENDING');
+    assert.equal(stored.paymentStatus, 'PENDING');
+    assert.equal(stored.totalAmount, 11);
+    assert.ok(stored.orderNumber);
+    assert.ok(stored.trackingToken);
+
+    const trackResponse = makeResponse();
+    let trackError: unknown;
+    await OrderController.getOrderByNumber({ params: { orderNumber: createResponse.body.data.orderNumber }, query: { token: createResponse.body.data.trackingToken } } as any, trackResponse as any, (error: unknown) => { trackError = error; });
+    assert.equal(trackError, undefined);
+    assert.equal(trackResponse.statusCode, 200);
+    assert.equal(trackResponse.body.data.orderNumber, createResponse.body.data.orderNumber);
+    assert.equal(trackResponse.body.data.paymentStatus, 'PENDING');
+  } finally {
+    db.order.findUnique = originals.orderFindUnique;
+    db.shop.findUnique = originals.shopFindUnique;
+    db.fileRecord.findUnique = originals.fileFindUnique;
+    db.paymentGatewayConfig.findFirst = originals.gatewayFindFirst;
+    db.$transaction = originals.transaction;
+    PricingEngineService.calculateItemPrice = originals.itemPrice;
+    PricingEngineService.calculateOrderTotal = originals.orderTotal;
+    PaymentGatewayService.initializeOrderPayment = originals.paymentInit;
   }
 });
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { api } from '../lib/api';
+import { ApiRequestError, api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { OrderDTO, PrintJobDTO } from '@printqr/types';
 import {
@@ -74,6 +74,12 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
         }
       }
     } catch (err: any) {
+      // Temporary production-safe diagnostic: omit the order reference and tracking token.
+      console.warn('[order-tracking] lookup failed', {
+        status: err instanceof ApiRequestError ? err.status : undefined,
+        orderReferencePresent: Boolean(orderNumber),
+        trackingTokenPresent: Boolean(trackingToken),
+      });
       setError(err.message || 'Order not found');
     } finally {
       setLoading(false);

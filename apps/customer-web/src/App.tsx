@@ -6,6 +6,7 @@ import { OrderTrackingPage } from './pages/OrderTrackingPage';
 import { LegalPageView } from './pages/LegalPageView';
 import { AuthActionPage } from './pages/AuthActionPage';
 import { getShopSlugFromPath } from './lib/shop-route.js';
+import { getNavigationPathname } from './lib/navigation.js';
 
 export const App: React.FC = () => {
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);
@@ -20,7 +21,9 @@ export const App: React.FC = () => {
 
   const navigate = (path: string) => {
     window.history.pushState({}, '', path);
-    setCurrentPath(path);
+    // Keep query parameters in the browser URL, but route on pathname only.
+    // Tracking links include ?token=..., which must never become part of the order number.
+    setCurrentPath(getNavigationPathname(path));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
