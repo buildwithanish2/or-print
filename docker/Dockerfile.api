@@ -1,15 +1,17 @@
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Copy root and package manifests
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json* ./
 COPY packages/ ./packages/
 COPY apps/api/ ./apps/api/
 
 RUN npm install
 
-# Build shared packages and API
 RUN npm run build --workspace=packages/types
 RUN npm run build --workspace=packages/config
 RUN npm run build --workspace=packages/validation
@@ -19,8 +21,13 @@ RUN npm run build --workspace=apps/api
 # Windows artifacts are built on a Windows runner and included in the API image.
 RUN node apps/api/scripts/verify-agent-release.cjs
 
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 
 COPY --from=builder /app/package.json ./
@@ -32,4 +39,5 @@ COPY --from=builder /app/apps/api/public ./apps/api/public
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 
 EXPOSE 5000
+
 CMD ["node", "apps/api/dist/server.js"]
