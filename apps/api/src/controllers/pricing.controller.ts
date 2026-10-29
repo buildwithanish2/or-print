@@ -4,7 +4,7 @@ import { PricingEngineService } from '../services/pricing.service';
 import { PricingRuleSchema, PrintSettingsSchema } from '@printqr/validation';
 import { PrintSettingsDTO } from '@printqr/types';
 import { DEFAULT_PLATFORM_PRICING_RULES } from '@printqr/config';
-import { FreePrintEligibilityError, getFreePrintEligibility, getGuestFreePrintEligibility } from '../services/free-print.service';
+import { FreePrintEligibilityError, getFreePrintEligibility, getGuestFreePrintEligibility, getVerifiedInstitutionIdForPricing } from '../services/free-print.service';
 
 export class PricingController {
   /**
@@ -27,6 +27,7 @@ export class PricingController {
       }
       const printer = shop.printers[0];
       const shopId = shop.id;
+      const institutionId = await getVerifiedInstitutionIdForPricing(req.user?.id, String(req.get('X-Free-Print-Token') || ''), shopId);
 
       const itemBreakdowns = [];
       const itemFiles: any[] = [];
@@ -60,7 +61,8 @@ export class PricingController {
           item.fileId,
           fileName,
           docPages,
-          settings as PrintSettingsDTO
+          settings as PrintSettingsDTO,
+          institutionId
         );
         itemBreakdowns.push({ ...breakdown, colorMode: settings.colorMode });
       }

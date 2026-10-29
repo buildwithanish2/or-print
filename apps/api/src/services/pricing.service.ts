@@ -2,6 +2,20 @@ import { APP_CONFIG, DEFAULT_PLATFORM_PRICING_RULES } from '@printqr/config';
 import { PrintSettingsDTO, PricingBreakdown, OrderPriceCalculation } from '@printqr/types';
 import { prisma } from '../prisma';
 
+type EffectivePricingRule = {
+  id: string;
+  paperSize: string;
+  colorMode: string;
+  singleSidePrice: number;
+  duplexPrice: number;
+  duplexDiscountPercent: number;
+  bulkMinPages: number;
+  bulkDiscountPercent: number;
+};
+
+export const isInstitutionPricingTableUnavailable = (error: any) => error?.code === 'P2021'
+  && String(error?.meta?.table || '').includes('InstitutionPricingRule');
+
 export class PricingEngineService {
   static validatePageRange(pageRange: string, totalPages: number): { valid: boolean; message?: string; count: number } {
     if (!Number.isInteger(totalPages) || totalPages < 1) return { valid: false, message: 'Document page count is invalid', count: 0 };
@@ -61,7 +75,8 @@ export class PricingEngineService {
     fileId: string,
     fileName: string,
     documentTotalPages: number,
-    settings: PrintSettingsDTO
+    settings: PrintSettingsDTO,
+    institutionId?: string,
   ): Promise<PricingBreakdown> {
     const selectedPages = this.parseSelectedPagesCount(settings.pageRange, documentTotalPages);
     const copies = Math.max(1, settings.copies || 1);
@@ -74,8 +89,20 @@ export class PricingEngineService {
       ? Math.ceil(sheetsPerCopy / 2) * copies
       : sheetsPerCopy * copies;
 
-    // Fetch shop pricing rule or fallback to global default
-    let rule = await prisma.pricingRule.findFirst({
+    // Institution overrides take precedence, then the shop rule, then platform defaults.
+    let rule: EffectivePricingRule | null = null;
+    if (institutionId) {
+      try {
+        rule = await prisma.institutionPricingRule.findUnique({
+          where: { institutionId_paperSize_colorMode: { institutionId, paperSize: settings.paperSize, colorMode: settings.colorMode } },
+        });
+      } catch (error) {
+        // Keep legacy pricing available while a release's additive migration is pending.
+        if (!isInstitutionPricingTableUnavailable(error)) throw error;
+      }
+    }
+
+    if (!rule) rule = await prisma.pricingRule.findFirst({
       where: {
         shopId,
         paperSize: settings.paperSize,
@@ -91,7 +118,6 @@ export class PricingEngineService {
 
       rule = {
         id: defaultRule.id,
-        shopId: null,
         paperSize: defaultRule.paperSize,
         colorMode: defaultRule.colorMode,
         singleSidePrice: defaultRule.singleSidePrice,
@@ -99,9 +125,6 @@ export class PricingEngineService {
         duplexDiscountPercent: defaultRule.duplexDiscountPercent,
         bulkMinPages: defaultRule.bulkMinPages,
         bulkDiscountPercent: defaultRule.bulkDiscountPercent,
-        isDefault: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
       };
     }
 

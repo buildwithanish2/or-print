@@ -11,6 +11,8 @@
 
 The guest-review migration is `apps/api/prisma/migrations/20261029_guest_shop_id_verification/migration.sql`. It adds guest verification tables and rebuilds the usage/reservation tables to support guest identities while preserving existing rows. Apply migrations in order only after inspecting the target SQLite file. Do not apply them automatically to production, and do not use `db push`, reset, or `migrate deploy` for this existing database without a migration ledger.
 
+College-specific paid pricing is added by `apps/api/prisma/migrations/20261101_institution_pricing_rules/migration.sql`. It creates an additive table keyed by institution, paper size, and color mode; it does not rewrite existing shop/platform rates. Apply it after the five earlier SQL migrations below. Until it is applied, the API keeps existing rates active and the admin page reports that College Pricing Control is waiting for the migration.
+
 Before migration, stop API writers and the print agent. For a host-side SQLite file, create and hash-verify a backup:
 
 ```powershell
@@ -29,6 +31,9 @@ Those commands show the known local development file, not production. For produc
 npx prisma db execute --schema apps/api/prisma/schema.prisma --file apps/api/prisma/migrations/20261028_subscription_payment_attempts/migration.sql
 npx prisma db execute --schema apps/api/prisma/schema.prisma --file apps/api/prisma/migrations/20261029_college_free_printing/migration.sql
 npx prisma db execute --schema apps/api/prisma/schema.prisma --file apps/api/prisma/migrations/20261029_guest_shop_id_verification/migration.sql
+npx prisma db execute --schema apps/api/prisma/schema.prisma --file apps/api/prisma/migrations/20261030_auth_contact_tokens/migration.sql
+npx prisma db execute --schema apps/api/prisma/schema.prisma --file apps/api/prisma/migrations/20261031_shop_welcome_email_dedupe/migration.sql
+npx prisma db execute --schema apps/api/prisma/schema.prisma --file apps/api/prisma/migrations/20261101_institution_pricing_rules/migration.sql
 npx prisma validate --schema apps/api/prisma/schema.prisma
 ```
 

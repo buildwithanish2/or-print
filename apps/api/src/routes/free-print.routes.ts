@@ -20,6 +20,7 @@ router.get('/admin', authenticate, requireAdmin, FreePrintController.adminGet);
 router.put('/admin/policy', authenticate, requireAdmin, FreePrintController.updatePolicy);
 router.post('/admin/institutions', authenticate, requireAdmin, FreePrintController.saveInstitution);
 router.put('/admin/institutions/:id', authenticate, requireAdmin, FreePrintController.saveInstitution);
+router.put('/admin/institutions/:id/pricing', authenticate, requireAdmin, FreePrintController.saveInstitutionPricing);
 router.put('/admin/shops/:shopId', authenticate, requireAdmin, FreePrintController.adminSetShopParticipation);
 router.patch('/admin/verifications/:id', authenticate, requireAdmin, FreePrintController.reviewVerification);
 

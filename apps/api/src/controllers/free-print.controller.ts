@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { prisma } from '../prisma';
+import { InstitutionPricingRuleSchema } from '@printqr/validation';
+import { isInstitutionPricingTableUnavailable } from '../services/pricing.service';
 import { canShopOwnerReviewGuestId, getFreePrintEligibility, getGuestFreePrintEligibility, getGuestVerificationByToken, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../services/free-print.service';
 
 const evidenceDir = path.resolve(process.env.COLLEGE_EVIDENCE_DIR || path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads'), '..', 'private-college-evidence'));
@@ -225,15 +227,22 @@ export class FreePrintController {
 
   static async adminGet(req: Request, res: Response, next: NextFunction) {
     try {
+      let collegePricingAvailable = true;
+      const institutionQuery = prisma.institution.findMany({ include: { pricingRules: { orderBy: [{ paperSize: 'asc' }, { colorMode: 'asc' }] } }, orderBy: { name: 'asc' } })
+        .catch(async (error) => {
+          if (!isInstitutionPricingTableUnavailable(error)) throw error;
+          collegePricingAvailable = false;
+          return prisma.institution.findMany({ orderBy: { name: 'asc' } });
+        });
       const [policy, institutions, verifications, shops, audits, usage] = await Promise.all([
         prisma.freePrintPolicy.findUnique({ where: { id: 'global' } }),
-        prisma.institution.findMany({ orderBy: { name: 'asc' } }),
+        institutionQuery,
         prisma.institutionVerification.findMany({ where: { status: { in: ['PENDING', 'APPROVED'] } }, include: { user: { select: { id: true, name: true, email: true } }, institution: { select: { id: true, name: true } } }, orderBy: { submittedAt: 'asc' }, take: 200 }),
         prisma.shop.findMany({ select: { id: true, name: true, slug: true, freePrintSettings: true }, orderBy: { name: 'asc' } }),
         prisma.freePrintPolicyAudit.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
         prisma.freePrintUsage.findMany({ orderBy: { updatedAt: 'desc' }, take: 200, include: { user: { select: { name: true, email: true, role: true } } } }),
       ]);
-      return res.json({ success: true, data: { policy, institutions, verifications: verifications.map(({ evidenceStorageKey: _key, ...v }) => v), shops, audits, usage } });
+      return res.json({ success: true, data: { policy, institutions, collegePricingAvailable, verifications: verifications.map(({ evidenceStorageKey: _key, ...v }) => v), shops, audits, usage } });
     } catch (err) { next(err); }
   }
 
@@ -270,6 +279,38 @@ export class FreePrintController {
       });
       return res.json({ success: true, data: record });
     } catch (err) { next(err); }
+  }
+
+  static async saveInstitutionPricing(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = InstitutionPricingRuleSchema.parse(req.body);
+      const institutionId = String(req.params.id || '');
+      const institution = await prisma.institution.findUnique({ where: { id: institutionId }, select: { id: true, name: true } });
+      if (!institution) return res.status(404).json({ success: false, message: 'Institution not found' });
+
+      const uniqueKey = { institutionId_paperSize_colorMode: { institutionId, paperSize: data.paperSize, colorMode: data.colorMode } };
+      const saved = await prisma.$transaction(async (tx) => {
+        const before = await tx.institutionPricingRule.findUnique({ where: uniqueKey });
+        const rule = await tx.institutionPricingRule.upsert({
+          where: uniqueKey,
+          create: { institutionId, ...data },
+          update: { ...data },
+        });
+        await tx.freePrintPolicyAudit.create({ data: {
+          actorUserId: req.user!.id,
+          scope: 'INSTITUTION_PRICING',
+          scopeId: institutionId,
+          action: before ? 'UPDATED' : 'CREATED',
+          beforeJson: before ? JSON.stringify(before) : null,
+          afterJson: JSON.stringify(rule),
+        } });
+        return rule;
+      });
+      return res.json({ success: true, data: { institution, rule: saved } });
+    } catch (err) {
+      if (isInstitutionPricingTableUnavailable(err)) return res.status(503).json({ success: false, message: 'College pricing storage is not ready. Apply the additive pricing migration, then retry.' });
+      next(err);
+    }
   }
 
   static async reviewVerification(req: Request, res: Response, next: NextFunction) {

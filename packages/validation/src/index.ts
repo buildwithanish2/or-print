@@ -85,6 +85,16 @@ export const PricingRuleSchema = z.object({
   bulkDiscountPercent: z.number().min(0).max(100).default(0),
 });
 
+export const InstitutionPricingRuleSchema = z.object({
+  paperSize: z.enum(['A4', 'A3', 'A5', 'LETTER', 'LEGAL', 'CUSTOM']),
+  colorMode: z.enum(['BW', 'COLOR']),
+  singleSidePrice: z.number().finite().min(0.1).max(100000),
+  duplexPrice: z.number().finite().min(0.1).max(100000),
+  duplexDiscountPercent: z.number().finite().min(0).max(100).default(0),
+  bulkMinPages: z.number().int().min(1).max(100000).default(50),
+  bulkDiscountPercent: z.number().finite().min(0).max(100).default(0),
+});
+
 export const CouponSchema = z.object({
   code: z.string().min(3).max(20).toUpperCase(),
   discountType: z.enum(['PERCENTAGE', 'FIXED']),

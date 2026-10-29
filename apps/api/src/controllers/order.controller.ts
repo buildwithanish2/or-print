@@ -6,7 +6,7 @@ import { canCollectCashPayment, decryptPaymentCredential, PaymentGatewayService 
 import { WebSocketService } from '../services/socket.service';
 import { getApiBaseUrl } from '@printqr/config';
 import crypto from 'crypto';
-import { FreePrintEligibilityError, getFreePrintEligibility, getGuestFreePrintEligibility, getGuestVerificationByToken, reserveFreePrintAllowance } from '../services/free-print.service';
+import { FreePrintEligibilityError, getFreePrintEligibility, getGuestFreePrintEligibility, getGuestVerificationByToken, getVerifiedInstitutionIdForPricing, reserveFreePrintAllowance } from '../services/free-print.service';
 import { canManageShopPayment } from '../services/payment.service';
 
 export class OrderController {
@@ -60,6 +60,7 @@ export class OrderController {
       }
 
       const chosenPrinter = shop.printers.find((printer) => printer.isDefault) || shop.printers[0];
+      const institutionId = await getVerifiedInstitutionIdForPricing(req.user?.id, guestFreePrintToken, shop.id);
       for (const item of data.items) {
         if (item.settings.colorMode === 'COLOR' && !chosenPrinter.supportsColor) {
           return res.status(400).json({ success: false, message: 'The selected printer does not support color printing' });
@@ -98,7 +99,8 @@ export class OrderController {
           file.id,
           file.originalName,
           file.pageCount,
-          item.settings as any
+          item.settings as any,
+          institutionId
         );
         itemBreakdowns.push({ ...breakdown, settings: item.settings });
       }

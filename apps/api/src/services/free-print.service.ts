@@ -76,6 +76,25 @@ export async function getGuestVerificationByToken(token: string) {
   return prisma.guestInstitutionVerification.findUnique({ where: { accessTokenHash: hashGuestAccessToken(token) } });
 }
 
+/** Resolve institution pricing only from a currently approved identity; never accept an institution ID from the client. */
+export async function getVerifiedInstitutionIdForPricing(userId: string | undefined, guestToken: string, shopId: string) {
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { verification: { include: { institution: true } } } });
+    const verification = user?.verification;
+    if (user?.isActive && ['STUDENT', 'TEACHER'].includes(user.role)
+      && verification?.active && verification.status === 'APPROVED'
+      && verification.requestedRole === user.role
+      && verification.institution.isActive && verification.institution.isEligible) {
+      return verification.institutionId;
+    }
+  }
+
+  const guest = guestToken ? await getGuestVerificationByToken(guestToken) : null;
+  if (!guest || guest.shopId !== shopId || guest.status !== 'APPROVED' || !guest.active || !guest.identityHash) return undefined;
+  const institution = await prisma.institution.findUnique({ where: { id: guest.institutionId }, select: { isActive: true, isEligible: true } });
+  return institution?.isActive && institution.isEligible ? guest.institutionId : undefined;
+}
+
 export async function getGuestFreePrintEligibility(token: string, shopId: string, colorModes: string[]) {
   const verification = await getGuestVerificationByToken(token);
   if (!verification || verification.shopId !== shopId || verification.status !== 'APPROVED' || !verification.active || !verification.identityHash) {

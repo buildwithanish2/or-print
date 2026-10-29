@@ -20,6 +20,7 @@ import { SupportTicketsPage } from './pages/SupportTicketsPage';
 import { LegalPagesManagement } from './pages/LegalPagesManagement';
 import { CollegeFreePrintingPage } from './pages/CollegeFreePrintingPage';
 import { api, CUSTOMER_PORTAL_URL } from './lib/api';
+import { AdminTab, getAdminPathForTab, getAdminTabFromPath } from './lib/admin-navigation.mjs';
 import {
   Shield,
   LayoutDashboard,
@@ -53,27 +54,19 @@ export const App: React.FC = () => {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const [activeTab, setActiveTab] = useState<
-    | 'overview'
-    | 'leads'
-    | 'partners'
-    | 'tickets'
-    | 'shops'
-    | 'add-shop'
-    | 'agents'
-    | 'plans'
-    | 'pricing'
-    | 'gateways'
-    | 'navigation'
-    | 'banners'
-    | 'diagnostics'
-    | 'testimonials'
-    | 'demo-video'
-    | 'statistics'
-    | 'coupons'
-    | 'legal'
-    | 'college-free-printing'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => getAdminTabFromPath(window.location.pathname));
+
+  const navigateToTab = (tab: AdminTab) => {
+    const path = getAdminPathForTab(tab);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+    setActiveTab(tab);
+  };
+
+  useEffect(() => {
+    const restoreTabFromHistory = () => setActiveTab(getAdminTabFromPath(window.location.pathname));
+    window.addEventListener('popstate', restoreTabFromHistory);
+    return () => window.removeEventListener('popstate', restoreTabFromHistory);
+  }, []);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -167,7 +160,7 @@ export const App: React.FC = () => {
                     key={item.id}
                     type="button"
                     onClick={() => {
-                      setActiveTab(item.id as any);
+                      navigateToTab(item.id as AdminTab);
                       setMobileMenuOpen(false);
                     }}
                     className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
@@ -302,8 +295,8 @@ export const App: React.FC = () => {
             {activeTab === 'partners' && <PartnersManagementPage />}
             {activeTab === 'tickets' && <SupportTicketsPage />}
             {activeTab === 'legal' && <LegalPagesManagement />}
-            {activeTab === 'shops' && <ShopsManagement onNavigateToAddShop={() => setActiveTab('add-shop')} />}
-            {activeTab === 'add-shop' && <AddShopPage onShopCreated={() => setActiveTab('shops')} />}
+            {activeTab === 'shops' && <ShopsManagement onNavigateToAddShop={() => navigateToTab('add-shop')} />}
+            {activeTab === 'add-shop' && <AddShopPage onShopCreated={() => navigateToTab('shops')} />}
             {activeTab === 'agents' && <AgentManagementPage />}
             {activeTab === 'diagnostics' && <SystemDiagnosticsPage />}
             {activeTab === 'plans' && <SubscriptionsPage />}

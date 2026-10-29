@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PricingEngineService } from '../src/services/pricing.service';
-import { CreateOrderSchema, LoginSchema, ShopRegistrationSchema } from '../../../packages/validation/src/index';
+import { CreateOrderSchema, InstitutionPricingRuleSchema, LoginSchema, ShopRegistrationSchema } from '../../../packages/validation/src/index';
 import crypto from 'crypto';
 import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment, decryptPaymentCredentialWithKey, encryptPaymentCredentialWithKey, isValidUpiVpa, PaymentGatewayService, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../src/services/payment.service';
 import { canReserveFreePrintAllowance, canShopOwnerReviewGuestId, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../src/services/free-print.service';
@@ -11,6 +11,7 @@ import { OrderController } from '../src/controllers/order.controller';
 import { PaymentController } from '../src/controllers/payment.controller';
 import { ShopController } from '../src/controllers/shop.controller';
 import { AgentController } from '../src/controllers/agent.controller';
+import { FreePrintController } from '../src/controllers/free-print.controller';
 import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
 import { requireAdmin } from '../src/middleware/rbac.middleware';
@@ -48,6 +49,7 @@ test('server-generated production portal and API URLs never fall back to localho
   const originalShopPortalUrl = process.env.SHOP_PORTAL_URL;
   const originalAppPublicUrl = process.env.APP_PUBLIC_URL;
   const originalAdminPortalUrl = process.env.ADMIN_PORTAL_URL;
+  const originalApiUrl = process.env.API_URL;
   try {
     process.env.NODE_ENV = 'production';
     delete process.env.API_PUBLIC_URL;
@@ -55,6 +57,7 @@ test('server-generated production portal and API URLs never fall back to localho
     delete process.env.SHOP_PORTAL_URL;
     delete process.env.APP_PUBLIC_URL;
     delete process.env.ADMIN_PORTAL_URL;
+    delete process.env.API_URL;
     assert.equal(getApiBaseUrl(), 'https://api.anishnova.com');
     assert.equal(getShopWebUrl(), 'https://shop-dashboard-one-eosin.vercel.app');
     assert.equal(getAdminWebUrl(), 'https://or-print.vercel.app');
@@ -72,6 +75,7 @@ test('server-generated production portal and API URLs never fall back to localho
     if (originalShopPortalUrl === undefined) delete process.env.SHOP_PORTAL_URL; else process.env.SHOP_PORTAL_URL = originalShopPortalUrl;
     if (originalAppPublicUrl === undefined) delete process.env.APP_PUBLIC_URL; else process.env.APP_PUBLIC_URL = originalAppPublicUrl;
     if (originalAdminPortalUrl === undefined) delete process.env.ADMIN_PORTAL_URL; else process.env.ADMIN_PORTAL_URL = originalAdminPortalUrl;
+    if (originalApiUrl === undefined) delete process.env.API_URL; else process.env.API_URL = originalApiUrl;
   }
 });
 
@@ -105,6 +109,7 @@ test('free-print order creation returns identifiers that the tracking endpoint r
     policyFindUnique: db.freePrintPolicy.findUnique,
     shopSettingFindUnique: db.freePrintShopSetting.findUnique,
     institutionFindUnique: db.institution.findUnique,
+    institutionPricingFindUnique: db.institutionPricingRule.findUnique,
     usageFindUnique: db.freePrintUsage.findUnique,
     transaction: db.$transaction,
   };
@@ -134,6 +139,7 @@ test('free-print order creation returns identifiers that the tracking endpoint r
     db.freePrintPolicy.findUnique = async () => policy;
     db.freePrintShopSetting.findUnique = async () => ({ participating: true });
     db.institution.findUnique = async () => verification.institution;
+    db.institutionPricingRule.findUnique = async () => null;
     db.freePrintUsage.findUnique = async () => null;
     db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
 
@@ -175,6 +181,7 @@ test('free-print order creation returns identifiers that the tracking endpoint r
     db.freePrintPolicy.findUnique = original.policyFindUnique;
     db.freePrintShopSetting.findUnique = original.shopSettingFindUnique;
     db.institution.findUnique = original.institutionFindUnique;
+    db.institutionPricingRule.findUnique = original.institutionPricingFindUnique;
     db.freePrintUsage.findUnique = original.usageFindUnique;
     db.$transaction = original.transaction;
   }
@@ -943,5 +950,147 @@ test('print-agent heartbeat rejects missing bearer credentials', async () => {
     assert.equal(statusCode, 401);
   } finally {
     db.printerAgent.findUnique = originalFindUnique;
+  }
+});
+
+test('college pricing validation rejects non-finite, negative, and unsupported prices', () => {
+  const base = { paperSize: 'A4', colorMode: 'BW', singleSidePrice: 2, duplexPrice: 3, duplexDiscountPercent: 0, bulkMinPages: 50, bulkDiscountPercent: 0 };
+  assert.equal(InstitutionPricingRuleSchema.safeParse(base).success, true);
+  assert.equal(InstitutionPricingRuleSchema.safeParse({ ...base, singleSidePrice: Number.POSITIVE_INFINITY }).success, false);
+  assert.equal(InstitutionPricingRuleSchema.safeParse({ ...base, duplexPrice: -1 }).success, false);
+  assert.equal(InstitutionPricingRuleSchema.safeParse({ ...base, paperSize: 'TABLOID' }).success, false);
+});
+
+test('college pricing is scoped by institution and takes precedence over shop rates', async () => {
+  const db = prisma as any;
+  const originalCollegeFind = db.institutionPricingRule.findUnique;
+  const originalShopFind = db.pricingRule.findFirst;
+  const calls: string[] = [];
+  const shopRule = { id: 'shop', singleSidePrice: 2, duplexPrice: 4, bulkMinPages: 100, bulkDiscountPercent: 0 };
+  try {
+    db.institutionPricingRule.findUnique = async ({ where }: any) => {
+      const institutionId = where.institutionId_paperSize_colorMode.institutionId;
+      calls.push(institutionId);
+      return { id: institutionId, singleSidePrice: institutionId === 'college-a' ? 5 : 7, duplexPrice: 9, bulkMinPages: 100, bulkDiscountPercent: 0 };
+    };
+    db.pricingRule.findFirst = async () => shopRule;
+    const settings = { colorMode: 'BW', paperSize: 'A4', orientation: 'PORTRAIT', duplexMode: 'SIMPLEX', copies: 1, pageRange: 'ALL', pagesPerSheet: 1, quality: 'NORMAL', selectedPagesCount: 2 } as any;
+    const collegeA = await PricingEngineService.calculateItemPrice('shop', 'file-a', 'a.pdf', 2, settings, 'college-a');
+    const collegeB = await PricingEngineService.calculateItemPrice('shop', 'file-b', 'b.pdf', 2, settings, 'college-b');
+    const shopOnly = await PricingEngineService.calculateItemPrice('shop', 'file-c', 'c.pdf', 2, settings);
+    assert.equal(collegeA.itemTotal, 10);
+    assert.equal(collegeB.itemTotal, 14);
+    assert.equal(shopOnly.itemTotal, 4);
+    assert.deepEqual(calls, ['college-a', 'college-b']);
+  } finally {
+    db.institutionPricingRule.findUnique = originalCollegeFind;
+    db.pricingRule.findFirst = originalShopFind;
+  }
+});
+
+test('pending college pricing migration keeps existing pricing available and exposes a clear setup state', async () => {
+  const db = prisma as any;
+  const originalCollegeFind = db.institutionPricingRule.findUnique;
+  const originalShopFind = db.pricingRule.findFirst;
+  try {
+    db.institutionPricingRule.findUnique = async () => { throw { code: 'P2021', meta: { table: 'main.InstitutionPricingRule' } }; };
+    db.pricingRule.findFirst = async () => ({ id: 'shop-rule', singleSidePrice: 3, duplexPrice: 5, bulkMinPages: 100, bulkDiscountPercent: 0 });
+    const price = await PricingEngineService.calculateItemPrice('shop', 'file', 'file.pdf', 2, { colorMode: 'BW', paperSize: 'A4', orientation: 'PORTRAIT', duplexMode: 'SIMPLEX', copies: 1, pageRange: 'ALL', pagesPerSheet: 1, quality: 'NORMAL', selectedPagesCount: 2 } as any, 'college');
+    assert.equal(price.itemTotal, 6);
+  } finally {
+    db.institutionPricingRule.findUnique = originalCollegeFind;
+    db.pricingRule.findFirst = originalShopFind;
+  }
+});
+
+test('college pricing save returns a migration-required response rather than hiding a missing table', async () => {
+  const db = prisma as any;
+  const originals = { institutionFind: db.institution.findUnique, transaction: db.$transaction };
+  try {
+    db.institution.findUnique = async () => ({ id: 'college-a', name: 'College A' });
+    db.$transaction = async (callback: (tx: any) => Promise<any>) => callback({
+      institutionPricingRule: { findUnique: async () => { throw { code: 'P2021', meta: { table: 'main.InstitutionPricingRule' } }; } },
+    });
+    let statusCode = 200;
+    let body: any;
+    const req: any = { params: { id: 'college-a' }, user: { id: 'admin-1', role: 'SUPER_ADMIN' }, body: { paperSize: 'A4', colorMode: 'BW', singleSidePrice: 4, duplexPrice: 6 } };
+    const res: any = { status(code: number) { statusCode = code; return this; }, json(value: any) { body = value; return this; } };
+    await FreePrintController.saveInstitutionPricing(req, res, (error: unknown) => { throw error; });
+    assert.equal(statusCode, 503);
+    assert.match(body.message, /migration/i);
+  } finally {
+    db.institution.findUnique = originals.institutionFind;
+    db.$transaction = originals.transaction;
+  }
+});
+
+test('college admin dashboard remains readable while the additive pricing migration is pending', async () => {
+  const db = prisma as any;
+  const originals = {
+    institutionFindMany: db.institution.findMany,
+    policyFind: db.freePrintPolicy.findUnique,
+    verificationFindMany: db.institutionVerification.findMany,
+    shopFindMany: db.shop.findMany,
+    auditFindMany: db.freePrintPolicyAudit.findMany,
+    usageFindMany: db.freePrintUsage.findMany,
+  };
+  try {
+    db.institution.findMany = async ({ include }: any) => {
+      if (include?.pricingRules) throw { code: 'P2021', meta: { table: 'main.InstitutionPricingRule' } };
+      return [{ id: 'college-a', name: 'College A' }];
+    };
+    db.freePrintPolicy.findUnique = async () => null;
+    db.institutionVerification.findMany = async () => [];
+    db.shop.findMany = async () => [];
+    db.freePrintPolicyAudit.findMany = async () => [];
+    db.freePrintUsage.findMany = async () => [];
+    let body: any;
+    const res: any = { json(value: any) { body = value; return this; } };
+    await FreePrintController.adminGet({} as any, res, (error: unknown) => { throw error; });
+    assert.equal(body.success, true);
+    assert.equal(body.data.collegePricingAvailable, false);
+    assert.equal(body.data.institutions[0].name, 'College A');
+  } finally {
+    db.institution.findMany = originals.institutionFindMany;
+    db.freePrintPolicy.findUnique = originals.policyFind;
+    db.institutionVerification.findMany = originals.verificationFindMany;
+    db.shop.findMany = originals.shopFindMany;
+    db.freePrintPolicyAudit.findMany = originals.auditFindMany;
+    db.freePrintUsage.findMany = originals.usageFindMany;
+  }
+});
+
+test('Super Admin college pricing save persists an institution-scoped rule and audit record', async () => {
+  const db = prisma as any;
+  const originals = {
+    transaction: db.$transaction,
+    institutionFind: db.institution.findUnique,
+    collegeFind: db.institutionPricingRule.findUnique,
+    collegeUpsert: db.institutionPricingRule.upsert,
+    auditCreate: db.freePrintPolicyAudit.create,
+  };
+  let upsertArgs: any;
+  let auditArgs: any;
+  try {
+    db.$transaction = async (callback: (tx: any) => Promise<any>) => callback(db);
+    db.institution.findUnique = async ({ where }: any) => ({ id: where.id, name: 'College A' });
+    db.institutionPricingRule.findUnique = async () => null;
+    db.institutionPricingRule.upsert = async (args: any) => { upsertArgs = args; return { id: 'rule-1', ...args.create }; };
+    db.freePrintPolicyAudit.create = async (args: any) => { auditArgs = args; return {}; };
+    let body: any;
+    const req: any = { params: { id: 'college-a' }, user: { id: 'admin-1', role: 'SUPER_ADMIN' }, body: { paperSize: 'A4', colorMode: 'BW', singleSidePrice: 4, duplexPrice: 6, duplexDiscountPercent: 5, bulkMinPages: 50, bulkDiscountPercent: 10 } };
+    const res: any = { json(value: any) { body = value; return this; } };
+    await FreePrintController.saveInstitutionPricing(req, res, (error: unknown) => { throw error; });
+    assert.equal(body.success, true);
+    assert.equal(upsertArgs.where.institutionId_paperSize_colorMode.institutionId, 'college-a');
+    assert.equal(upsertArgs.create.institutionId, 'college-a');
+    assert.equal(auditArgs.data.scope, 'INSTITUTION_PRICING');
+    assert.equal(auditArgs.data.actorUserId, 'admin-1');
+  } finally {
+    db.$transaction = originals.transaction;
+    db.institution.findUnique = originals.institutionFind;
+    db.institutionPricingRule.findUnique = originals.collegeFind;
+    db.institutionPricingRule.upsert = originals.collegeUpsert;
+    db.freePrintPolicyAudit.create = originals.auditCreate;
   }
 });
