@@ -37,11 +37,11 @@ Connect the GitHub repository `buildwithanish2/or-print` to Vercel three times, 
 
 | Vercel project | Root Directory | Framework | Build command | Output directory |
 |---|---|---|---|---|
-| OR PRINT Customer | `apps/customer-web` | Vite | `npm run build` | `dist` |
-| OR PRINT Shop | `apps/shop-dashboard` | Vite | `npm run build` | `dist` |
-| OR PRINT Admin | `apps/admin-web` | Vite | `npm run build` | `dist` |
+| OR PRINT Customer | `apps/customer-web` | Vite | `vercel.json` workspace build | `dist` |
+| OR PRINT Shop | `apps/shop-dashboard` | Vite | `vercel.json` workspace build | `dist` |
+| OR PRINT Admin | `apps/admin-web` | Vite | `vercel.json` workspace build | `dist` |
 
-Use the repository's root `package-lock.json` and npm workspace install. In each project's Root Directory settings, enable **Include source files outside of Root Directory in the Build Step**, so the app can resolve `packages/config`, `packages/types`, and `packages/validation`. Leave the install command on Vercel's detected npm workspace default unless the build log shows it is not using the root lockfile.
+The committed `vercel.json` files install from the monorepo root, build the shared package declarations, and then build the selected app workspace. In each project's Root Directory settings, enable **Include source files outside of Root Directory in the Build Step**, so the app can resolve `packages/config`, `packages/types`, and `packages/validation`. These settings are especially important for the install/build commands that run from the repository root.
 
 Each app includes its own `vercel.json` SPA rewrite. This is required for direct visits and browser refreshes on routes such as `/print/:shopSlug`, `/track/:orderNumber`, and dashboard routes.
 

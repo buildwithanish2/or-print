@@ -1,5 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd ../.. && npm install",
+  "buildCommand": "cd ../.. && npm run build --workspace=packages/types && npm run build --workspace=packages/config && npm run build --workspace=packages/validation && npm run build --workspace=apps/admin-web",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
