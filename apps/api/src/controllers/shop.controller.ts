@@ -686,10 +686,10 @@ export class ShopController {
       if (!shop || shop.status !== 'ACTIVE') return res.status(404).json({ success: false, message: 'Shop not found' });
 
       let qrRecord = shop.qrCodes?.[0];
-      const targetUrl = `${getCustomerWebUrl()}/print/${shop.slug}`;
-      
+      const targetUrl = `${getCustomerWebUrl()}/print/${encodeURIComponent(shop.slug)}`;
+
       let qrDataUrl = qrRecord?.qrDataUrl;
-      if (!qrDataUrl) {
+      if (!qrDataUrl || qrRecord?.targetUrl !== targetUrl) {
         qrDataUrl = await QRCodeService.generateDataUrl(targetUrl);
         if (!qrRecord) {
           qrRecord = await prisma.qRCodeRecord.create({

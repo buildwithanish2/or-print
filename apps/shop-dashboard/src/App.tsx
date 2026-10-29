@@ -16,6 +16,7 @@ import { SupportPage } from './pages/SupportPage';
 import { CollegeFreePrintingPage } from './pages/CollegeFreePrintingPage';
 import { ShopAccountActionPage } from './pages/ShopAccountActionPage';
 import { CUSTOMER_PORTAL_URL } from './lib/api';
+import { buildCustomerPrintUrl } from './lib/customer-portal-url.js';
 import {
   LayoutDashboard,
   Clock,
@@ -64,6 +65,7 @@ export const App: React.FC = () => {
     | 'college-free-printing'
   >('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const customerPortalUrl = buildCustomerPrintUrl(CUSTOMER_PORTAL_URL, shop?.slug, import.meta.env.PROD);
 
   const actionPath = window.location.pathname;
   if (actionPath === '/verify-email') return <ShopAccountActionPage mode="verify" />;
@@ -207,14 +209,30 @@ export const App: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-3">
-              <a
-                href={`${CUSTOMER_PORTAL_URL}/print/${shop?.slug || ''}`}
-                target="_blank"
-                rel="noreferrer"
-                className="hidden sm:flex items-center space-x-1.5 text-xs font-semibold text-purple-300 hover:text-white bg-purple-600/20 px-3.5 py-1.5 rounded-xl border border-purple-500/30 transition-colors"
-              >
-                <span>View Customer Portal</span>
-              </a>
+              {customerPortalUrl ? (
+                <a
+                  href={customerPortalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hidden sm:flex items-center space-x-1.5 text-xs font-semibold text-purple-300 hover:text-white bg-purple-600/20 px-3.5 py-1.5 rounded-xl border border-purple-500/30 transition-colors"
+                >
+                  <span>View Customer Portal</span>
+                </a>
+              ) : (
+                <div className="text-right">
+                  <button
+                    type="button"
+                    aria-describedby="customer-portal-link-error"
+                    className="hidden sm:flex items-center space-x-1.5 text-xs font-semibold text-slate-400 bg-slate-800 px-3.5 py-1.5 rounded-xl border border-slate-700 cursor-not-allowed"
+                    disabled
+                  >
+                    <span>View Customer Portal</span>
+                  </button>
+                  <span id="customer-portal-link-error" role="alert" className="text-[10px] text-amber-300">
+                    Shop link unavailable. Refresh shop details or check the customer portal URL.
+                  </span>
+                </div>
+              )}
             </div>
           </header>
 

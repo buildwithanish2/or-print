@@ -52,7 +52,7 @@ Set these variables in each Vercel project's **Settings → Environment Variable
 | Project | Variables |
 |---|---|
 | Customer | `VITE_API_URL=https://api.example.com/api`; `VITE_SOCKET_URL=https://api.example.com`; `VITE_SHOP_URL=https://shop.example.com` |
-| Shop | `VITE_API_URL=https://api.example.com/api`; `VITE_SOCKET_URL=https://api.example.com`; `VITE_CUSTOMER_URL=https://print.example.com` |
+| Shop | `VITE_API_URL=https://api.example.com/api`; `VITE_SOCKET_URL=https://api.example.com`; `VITE_CUSTOMER_URL=https://customer-web-six-livid.vercel.app` |
 | Admin | `VITE_API_URL=https://api.example.com/api`; `VITE_CUSTOMER_URL=https://print.example.com`; `VITE_SHOP_URL=https://shop.example.com` |
 
 Replace all example domains with the actual Vercel/custom domains. The Socket.IO URL is the API origin without `/api`; TLS termination must support WebSocket upgrades.
