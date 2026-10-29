@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { Video, Play, Save, Check, ExternalLink, Sparkles } from 'lucide-react';
+import { getDemoVideoEmbedUrl } from '../lib/demo-video-url.mjs';
 
 export const DemoVideoManagement: React.FC = () => {
   const [title, setTitle] = useState('');
@@ -12,6 +13,15 @@ export const DemoVideoManagement: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const previewEmbedUrl = getDemoVideoEmbedUrl(videoUrl);
+  const previewDirectUrl = (() => {
+    try {
+      const url = new URL(videoUrl.trim());
+      return provider === 'DIRECT' && url.protocol === 'https:' && /\.mp4$/i.test(url.pathname) ? url.toString() : null;
+    } catch {
+      return null;
+    }
+  })();
 
   const fetchVideo = async () => {
     setLoading(true);
@@ -183,15 +193,19 @@ export const DemoVideoManagement: React.FC = () => {
           <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
             {videoUrl ? (
               provider === 'DIRECT' ? (
-                <video src={videoUrl} title={title || 'Demo Video'} className="w-full h-full" controls playsInline />
+                previewDirectUrl ? (
+                  <video src={previewDirectUrl} title={title || 'Demo Video'} className="w-full h-full" controls playsInline />
+                ) : <div className="p-4 text-center text-xs text-slate-400">Enter a valid HTTPS MP4 URL to preview.</div>
               ) : (
-                <iframe
-                  src={videoUrl}
-                  title={title || 'Demo Video'}
-                  className="w-full h-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                ></iframe>
+                previewEmbedUrl ? (
+                  <iframe
+                    src={previewEmbedUrl}
+                    title={title || 'Demo Video'}
+                    className="w-full h-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  ></iframe>
+                ) : <div className="p-4 text-center text-xs text-slate-400">Enter a valid HTTPS YouTube or Vimeo link. YouTube watch and youtu.be links are supported.</div>
               )
             ) : (
               <div className="text-slate-500 text-xs">Enter a valid video URL above to preview</div>
