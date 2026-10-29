@@ -6,9 +6,23 @@ import { LoginSchema } from '@printqr/validation';
 import { JWT_SECRET, JWT_REFRESH_SECRET } from '../config/secrets';
 import { EmailService } from '../services/email.service';
 import crypto from 'crypto';
-import { getCustomerWebUrl } from '@printqr/config';
+import { getCustomerWebUrl, getShopWebUrl } from '@printqr/config';
 
 const digestActionToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+const getShopPortalUrl = () => (process.env.SHOP_PORTAL_URL || process.env.APP_PUBLIC_URL || getShopWebUrl()).replace(/\/$/, '');
+
+const issueActionToken = async (userId: string, purpose: 'EMAIL_VERIFY' | 'PASSWORD_RESET', tokenHash: string) => prisma.$transaction(async (tx) => {
+  const previous = await tx.authActionToken.findFirst({ where: { userId, purpose }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+  if (previous && previous.createdAt.getTime() > Date.now() - 60_000) return false;
+  await tx.authActionToken.updateMany({ where: { userId, purpose, usedAt: null }, data: { usedAt: new Date() } });
+  await tx.authActionToken.create({ data: { userId, purpose, tokenHash, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
+  return true;
+});
+
+const getRecoveryPortalUrl = (role: string) => {
+  if (['SHOP_OWNER', 'SHOP_STAFF'].includes(role)) return getShopPortalUrl();
+  return getCustomerWebUrl().replace(/\/$/, '');
+};
 
 export class AuthController {
   static async login(req: Request, res: Response, next: NextFunction) {
@@ -201,16 +215,16 @@ export class AuthController {
       if (user && user.isActive) {
         const rawToken = crypto.randomBytes(32).toString('base64url');
         const tokenHash = digestActionToken(rawToken);
-        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-        await prisma.$transaction([
-          prisma.authActionToken.updateMany({ where: { userId: user.id, purpose: 'PASSWORD_RESET', usedAt: null }, data: { usedAt: new Date() } }),
-          prisma.authActionToken.create({ data: { userId: user.id, purpose: 'PASSWORD_RESET', tokenHash, expiresAt } }),
-        ]);
-        const link = `${getCustomerWebUrl()}/reset-password#token=${encodeURIComponent(rawToken)}`;
-        try {
-          await EmailService.sendActionLink(user.email, link, 'reset');
-        } catch {
-          await prisma.authActionToken.updateMany({ where: { tokenHash, usedAt: null }, data: { usedAt: new Date() } });
+        const tokenIssued = await issueActionToken(user.id, 'PASSWORD_RESET', tokenHash);
+        if (tokenIssued) {
+          const link = `${getRecoveryPortalUrl(user.role)}/reset-password#token=${encodeURIComponent(rawToken)}`;
+          try {
+            const sent = await EmailService.sendActionLink(user.email, link, 'reset');
+            if (!sent) throw new Error('Email delivery is not configured.');
+          } catch {
+            await prisma.authActionToken.updateMany({ where: { tokenHash, usedAt: null }, data: { usedAt: new Date() } });
+            console.warn('Password recovery email delivery failed.');
+          }
         }
       }
       return res.status(200).json({ success: true, message: 'If an eligible account exists, recovery instructions will be sent.' });
@@ -234,11 +248,17 @@ export class AuthController {
         if (!action || action.purpose !== 'PASSWORD_RESET' || action.usedAt || action.expiresAt <= new Date()) return false;
         const claimed = await tx.authActionToken.updateMany({ where: { id: action.id, purpose: 'PASSWORD_RESET', usedAt: null, expiresAt: { gt: new Date() } }, data: { usedAt: new Date() } });
         if (!claimed.count) return false;
-        await tx.user.update({ where: { id: action.userId }, data: { passwordHash, sessionVersion: { increment: 1 } } });
+        const user = await tx.user.update({ where: { id: action.userId }, data: { passwordHash, sessionVersion: { increment: 1 } }, select: { email: true, name: true } });
         await tx.authActionToken.updateMany({ where: { userId: action.userId, purpose: 'PASSWORD_RESET', usedAt: null }, data: { usedAt: new Date() } });
-        return true;
+        return user;
       });
       if (!result) return res.status(400).json({ success: false, message: 'This reset link is invalid or expired.' });
+      try {
+        const sent = await EmailService.sendPasswordChangedNotice(result.email, result.name);
+        if (!sent) console.warn('Password change notification email was not delivered because SMTP is unavailable.');
+      } catch {
+        console.warn('Password change notification email delivery failed.');
+      }
       return res.status(200).json({ success: true, message: 'Password updated. Please sign in again.' });
     } catch (err) { next(err); }
   }
@@ -271,12 +291,16 @@ export class AuthController {
       if (user && user.role === 'SHOP_OWNER' && user.emailVerificationRequired) {
         const rawToken = crypto.randomBytes(32).toString('base64url');
         const tokenHash = digestActionToken(rawToken);
-        await prisma.$transaction([
-          prisma.authActionToken.updateMany({ where: { userId: user.id, purpose: 'EMAIL_VERIFY', usedAt: null }, data: { usedAt: new Date() } }),
-          prisma.authActionToken.create({ data: { userId: user.id, purpose: 'EMAIL_VERIFY', tokenHash, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } }),
-        ]);
-        try { await EmailService.sendActionLink(user.email, `${getCustomerWebUrl()}/verify-email#token=${encodeURIComponent(rawToken)}`, 'verify'); }
-        catch { await prisma.authActionToken.updateMany({ where: { tokenHash, usedAt: null }, data: { usedAt: new Date() } }); }
+        const tokenIssued = await issueActionToken(user.id, 'EMAIL_VERIFY', tokenHash);
+        if (tokenIssued) {
+          try {
+            const sent = await EmailService.sendActionLink(user.email, `${getShopWebUrl()}/verify-email#token=${encodeURIComponent(rawToken)}`, 'verify');
+            if (!sent) throw new Error('Email delivery is not configured.');
+          } catch {
+            await prisma.authActionToken.updateMany({ where: { tokenHash, usedAt: null }, data: { usedAt: new Date() } });
+            console.warn('Shop email verification delivery failed.');
+          }
+        }
       }
       return res.status(200).json({ success: true, message: 'If the account needs verification, instructions will be sent.' });
     } catch (err) { next(err); }

@@ -3,11 +3,32 @@ import { prisma } from '../prisma';
 import { QRCodeService } from '../services/qr.service';
 import { WebSocketService } from '../services/socket.service';
 import { EmailService } from '../services/email.service';
-import { DEFAULT_PLATFORM_PRICING_RULES, getCustomerWebUrl } from '@printqr/config';
+import { DEFAULT_PLATFORM_PRICING_RULES, getCustomerWebUrl, getShopWebUrl } from '@printqr/config';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { PaymentGatewayService } from '../services/payment.service';
 import { ShopRegistrationSchema } from '@printqr/validation';
+
+const sendWelcomeEmailOnce = async (payload: Parameters<typeof EmailService.sendWelcomeEmail>[0], userId: string) => {
+  const claimAt = new Date();
+  const claim = await prisma.user.updateMany({
+    where: { id: userId, welcomeEmailSentAt: null },
+    data: { welcomeEmailSentAt: claimAt },
+  });
+  if (!claim.count) return false;
+
+  try {
+    const sent = await EmailService.sendWelcomeEmail(payload);
+    if (!sent) throw new Error('SMTP email delivery is unavailable.');
+    return true;
+  } catch (error) {
+    await prisma.user.updateMany({
+      where: { id: userId, welcomeEmailSentAt: claimAt },
+      data: { welcomeEmailSentAt: null },
+    });
+    throw error;
+  }
+};
 
 export class ShopController {
   /**
@@ -307,9 +328,25 @@ export class ShopController {
       let emailSent = false;
       try {
         emailSent = await EmailService.sendActionLink(result.user.email,
-          `${getCustomerWebUrl()}/verify-email?token=${encodeURIComponent(rawToken)}`, 'verify');
+          `${getShopWebUrl()}/verify-email#token=${encodeURIComponent(rawToken)}`, 'verify');
+        if (!emailSent) throw new Error('SMTP email delivery is unavailable.');
       } catch {
         await prisma.authActionToken.updateMany({ where: { tokenHash, usedAt: null }, data: { usedAt: new Date() } });
+        console.warn('Shop email verification delivery failed.');
+      }
+
+      let welcomeEmailSent = false;
+      try {
+        welcomeEmailSent = await sendWelcomeEmailOnce({
+          to: result.user.email,
+          ownerName: result.user.name,
+          shopName: result.shop.name,
+          planName,
+          shopUrl: getShopWebUrl(),
+          customerUrl: `${getCustomerWebUrl()}/print/${slug}`,
+        }, result.user.id);
+      } catch {
+        console.warn('Shop welcome email delivery failed. It may be retried after sign-in.');
       }
 
       return res.status(201).json({
@@ -325,19 +362,21 @@ export class ShopController {
           shop: { id: result.shop.id, name: result.shop.name, status: result.shop.status, planName, planPrice },
           email: result.user.email,
           emailSent,
+          welcomeEmailSent,
         },
       });
     } catch (err) {
       if (err instanceof Error && err.message === 'SUBSCRIPTION_PAYMENT_ALREADY_USED') {
         return res.status(409).json({ success: false, message: 'This subscription payment was already used. Contact support if you were charged.' });
       }
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+        return res.status(409).json({ success: false, message: 'An account with this email or shop URL already exists.' });
+      }
       next(err);
     }
   }
 
-  /**
-   * Resend Welcome Email with Pairing PIN
-   */
+  /** Retries delivery of a welcome email only when a previous send was not recorded. */
   static async resendWelcomeEmail(req: Request, res: Response, next: NextFunction) {
     try {
       const { shopId } = req.params;
@@ -346,7 +385,6 @@ export class ShopController {
         where: { OR: [{ id: shopId }, { slug: shopId }] },
         include: {
           owner: true,
-          agents: { orderBy: { createdAt: 'desc' }, take: 1 },
           qrCodes: { take: 1 },
         },
       });
@@ -359,19 +397,30 @@ export class ShopController {
         return res.status(404).json({ success: false, message: 'Shop not found' });
       }
 
-      const pairingCode = shop.agents[0]?.pairingCode;
-      if (!pairingCode) return res.status(404).json({ success: false, message: 'No active print-agent pairing code exists for this shop' });
+      if (shop.owner.welcomeEmailSentAt) {
+        return res.status(409).json({ success: false, code: 'WELCOME_ALREADY_SENT', message: 'The welcome email was already sent for this account.' });
+      }
       const customerUrl = shop.qrCodes[0]?.targetUrl || `${getCustomerWebUrl()}/print/${shop.slug}`;
-
-      const emailResult = await EmailService.sendWelcomeEmail({
-        to: shop.owner.email, ownerName: shop.owner.name, shopName: shop.name,
-        planName: 'Starter Plan', shopId: `ANP-SHOP-${shop.id.substring(0, 6).toUpperCase()}`,
-        pairingCode, customerUrl,
-      });
+      const subscription = await prisma.shopSubscription.findFirst({ where: { shopId: shop.id }, include: { plan: true }, orderBy: { createdAt: 'desc' } });
+      let emailSent: boolean;
+      try {
+        emailSent = await sendWelcomeEmailOnce({
+          to: shop.owner.email,
+          ownerName: shop.owner.name,
+          shopName: shop.name,
+          planName: subscription?.plan.name || 'Selected subscription plan',
+          shopUrl: getShopWebUrl(),
+          customerUrl,
+        }, shop.owner.id);
+      } catch {
+        console.warn('Shop welcome email retry failed.');
+        return res.status(503).json({ success: false, message: 'Welcome email could not be delivered. Please try again later.' });
+      }
+      if (!emailSent) return res.status(409).json({ success: false, code: 'WELCOME_ALREADY_SENT', message: 'The welcome email was already sent for this account.' });
 
       return res.status(200).json({
         success: true,
-        message: emailResult.message,
+        message: 'Welcome email sent.',
       });
     } catch (err) {
       next(err);
