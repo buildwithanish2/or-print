@@ -197,7 +197,27 @@ export const getApiBaseUrl = (): string => {
   if (typeof process !== 'undefined' && (process.env?.API_PUBLIC_URL || process.env?.PUBLIC_API_URL)) {
     return (process.env.API_PUBLIC_URL || process.env.PUBLIC_API_URL)!.replace(/\/$/, '');
   }
-  return 'http://localhost:5000';
+  return typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+    ? 'https://api.anishnova.com'
+    : 'http://localhost:5000';
+};
+
+const resolveServerPortalUrl = (configured: string | undefined, productionFallback: string, developmentFallback: string): string => {
+  const isProduction = typeof process !== 'undefined' && process.env?.NODE_ENV === 'production';
+  if (!isProduction) return (configured || developmentFallback).replace(/\/+$/, '');
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      const localHost = parsed.hostname === 'localhost' || parsed.hostname.endsWith('.localhost')
+        || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]';
+      if (parsed.protocol === 'https:' && !localHost && !parsed.username && !parsed.password) {
+        return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+      }
+    } catch {
+      // Use the known production portal if the configured URL is invalid.
+    }
+  }
+  return productionFallback;
 };
 
 export const getCustomerWebUrl = (): string => {
@@ -222,16 +242,17 @@ export const getCustomerWebUrl = (): string => {
 };
 
 export const getShopWebUrl = (): string => {
-  if (typeof process !== 'undefined' && (process.env?.SHOP_PORTAL_URL || process.env?.APP_PUBLIC_URL)) {
-    return (process.env.SHOP_PORTAL_URL || process.env.APP_PUBLIC_URL)!.replace(/\/$/, '');
-  }
-  return 'http://localhost:5174';
+  return resolveServerPortalUrl(
+    typeof process !== 'undefined' ? process.env?.SHOP_PORTAL_URL || process.env?.APP_PUBLIC_URL : undefined,
+    'https://shop-dashboard-one-eosin.vercel.app',
+    'http://localhost:5174',
+  );
 };
 
 export const getAdminWebUrl = (): string => {
-  if (typeof process !== 'undefined' && process.env?.ADMIN_PORTAL_URL) {
-    return process.env.ADMIN_PORTAL_URL.replace(/\/$/, '');
-  }
-  return 'http://localhost:5175';
+  return resolveServerPortalUrl(
+    typeof process !== 'undefined' ? process.env?.ADMIN_PORTAL_URL : undefined,
+    'https://or-print.vercel.app',
+    'http://localhost:5175',
+  );
 };
-

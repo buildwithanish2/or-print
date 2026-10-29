@@ -184,7 +184,7 @@ namespace PrintQRAgent
                         Config = loaded;
                         // The agent does not run a local API. Normalize stale localhost URLs,
                         // legacy /api suffixes, and malformed values to a safe cloud API base.
-                        Config.ServerUrl = AgentApiEndpoint.NormalizeServerUrl(Config.ServerUrl);
+                        Config.ServerUrl = AgentApiEndpoint.NormalizeForCurrentBuild(Config.ServerUrl);
                         Config.AgentToken ??= AgentCredentialStore.Load(Path.GetDirectoryName(filePath)!);
                         // Migrate credentials from older plaintext configuration to per-user Windows DPAPI storage.
                         if (!string.IsNullOrWhiteSpace(Config.AgentToken)) SaveConfig();

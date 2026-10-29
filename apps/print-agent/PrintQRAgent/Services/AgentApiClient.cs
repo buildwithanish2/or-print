@@ -13,15 +13,27 @@ namespace PrintQRAgent.Services
     {
         public const string ProductionServerUrl = "https://api.anishnova.com";
 
-        public static string NormalizeServerUrl(string? configuredUrl)
+        public static string NormalizeForCurrentBuild(string? configuredUrl)
         {
-            if (!Uri.TryCreate(configuredUrl?.Trim(), UriKind.Absolute, out var uri)
-                || (uri.Scheme != Uri.UriSchemeHttps && !(uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)))
-                return ProductionServerUrl;
+#if DEBUG
+            const bool allowLocalDevelopment = true;
+#else
+            const bool allowLocalDevelopment = false;
+#endif
+            return NormalizeServerUrl(configuredUrl, allowLocalDevelopment);
+        }
 
-            // This agent does not run a local API server. Migrate every legacy loopback URL,
-            // including values that already contain /api, to the configured cloud API.
-            if (uri.IsLoopback) return ProductionServerUrl;
+        public static string NormalizeServerUrl(string? configuredUrl, bool allowLocalDevelopment = false)
+        {
+            if (string.IsNullOrWhiteSpace(configuredUrl)) return ProductionServerUrl;
+            if (!Uri.TryCreate(configuredUrl.Trim(), UriKind.Absolute, out var uri)
+                || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+                throw new FormatException("The configured API URL is invalid. Enter an HTTPS API base URL.");
+
+            if (uri.IsLoopback && !allowLocalDevelopment) return ProductionServerUrl;
+            if (uri.Scheme != Uri.UriSchemeHttps
+                && !(allowLocalDevelopment && uri.Scheme == Uri.UriSchemeHttp))
+                throw new FormatException("The configured API URL must use HTTPS outside a development build.");
 
             var path = uri.AbsolutePath.TrimEnd('/');
             if (path.EndsWith("/api", StringComparison.OrdinalIgnoreCase))
@@ -33,7 +45,7 @@ namespace PrintQRAgent.Services
 
         public static Uri BuildApiUri(string? configuredUrl, string route)
         {
-            var root = NormalizeServerUrl(configuredUrl);
+            var root = NormalizeForCurrentBuild(configuredUrl);
             var cleanRoute = route.Trim().TrimStart('/');
             if (cleanRoute.StartsWith("api/", StringComparison.OrdinalIgnoreCase)) cleanRoute = cleanRoute[4..];
             return new Uri($"{root}/api/{cleanRoute}", UriKind.Absolute);

@@ -13,12 +13,12 @@
     "dev:customer": "npm run dev --workspace=apps/customer-web",
     "dev:shop": "npm run dev --workspace=apps/shop-dashboard",
     "dev:admin": "npm run dev --workspace=apps/admin-web",
-    "build": "npm run build --workspaces --if-present",
+    "build": "node scripts/build-workspaces.mjs",
     "agent:build": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/print-agent/publish.ps1",
     "db:generate": "npm run generate --workspace=apps/api",
     "db:push": "npm run db:push --workspace=apps/api",
     "db:seed": "npm run db:seed --workspace=apps/api",
-    "type-check": "npm run type-check --workspaces --if-present"
+    "type-check": "node scripts/type-check-workspaces.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

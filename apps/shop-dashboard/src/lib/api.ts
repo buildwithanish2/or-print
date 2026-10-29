@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { resolvePublicApiBaseUrl } from '../../../../packages/config/browser-urls.mjs';
 import { resolveCustomerPortalBaseUrl } from './customer-portal-url.js';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export const API_BASE_URL = resolvePublicApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.PROD);
 export const API_ROOT_URL = API_BASE_URL.replace(/\/$/, '');
 export const CUSTOMER_PORTAL_URL = resolveCustomerPortalBaseUrl(import.meta.env.VITE_CUSTOMER_URL, import.meta.env.PROD);
 

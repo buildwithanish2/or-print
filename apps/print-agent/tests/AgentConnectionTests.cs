@@ -17,6 +17,17 @@ public sealed class AgentConnectionTests
         Assert.Equal(
             "https://custom.example.test/api/agents/pair",
             AgentApiEndpoint.BuildApiUri("https://custom.example.test/api/", "/api/agents/pair").AbsoluteUri);
+        Assert.Equal("http://localhost:5000",
+            AgentApiEndpoint.NormalizeServerUrl("http://localhost:5000/api", allowLocalDevelopment: true));
+    }
+
+    [Fact]
+    public void InvalidProductionApiConfigurationFailsClearlyInsteadOfSilentlyRedirecting()
+    {
+        Assert.Throws<FormatException>(() => AgentApiEndpoint.NormalizeServerUrl("not-a-url"));
+        Assert.Throws<FormatException>(() => AgentApiEndpoint.NormalizeServerUrl("http://api.example.test"));
+        Assert.Equal(AgentApiEndpoint.ProductionServerUrl,
+            AgentApiEndpoint.NormalizeServerUrl("http://localhost:5000/api/"));
     }
 
     [Fact]
@@ -62,6 +73,25 @@ public sealed class AgentConnectionTests
         Assert.Null(config.AgentToken);
         Assert.Null(config.ShopId);
         Assert.Null(config.ShopName);
+    }
+
+    [Fact]
+    public async Task PairingRejectionDoesNotPersistCredentials()
+    {
+        var handler = new RecordingHandler((_, _) => Task.FromResult(JsonResponse("""
+            {"success":false,"message":"Invalid or expired Shop Pairing Code."}
+            """)));
+        using var http = new HttpClient(handler);
+        var config = new AgentConfig();
+        var persistCalled = false;
+        var client = new AgentPairingClient(config, http, () => { persistCalled = true; return true; });
+
+        var result = await client.PairAsync("ANP-EXPIRED-CODE");
+
+        Assert.False(result.success);
+        Assert.False(persistCalled);
+        Assert.Null(config.AgentToken);
+        Assert.Equal("Invalid or expired Shop Pairing Code.", result.message);
     }
 
     [Theory]

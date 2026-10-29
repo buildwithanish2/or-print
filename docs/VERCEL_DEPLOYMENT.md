@@ -55,7 +55,7 @@ Set these variables in each Vercel project's **Settings → Environment Variable
 | Shop | `VITE_API_URL=https://api.anishnova.com/api`; `VITE_SOCKET_URL=https://api.anishnova.com`; `VITE_CUSTOMER_URL=https://customer-web-six-livid.vercel.app` |
 | Admin | `VITE_API_URL=https://api.anishnova.com/api`; `VITE_CUSTOMER_URL=https://customer-web-six-livid.vercel.app`; `VITE_SHOP_URL=https://shop-dashboard-one-eosin.vercel.app` |
 
-The Customer Web production build now falls back to `https://api.anishnova.com/api` if `VITE_API_URL` is missing or points to a local/non-HTTPS host. Keep the explicit Vercel value above so deployments are predictable. The Shop and Admin builds still require their API variables. The Socket.IO URL is the API origin without `/api`; TLS termination must support WebSocket upgrades. Redeploy a portal after changing its variables.
+All three production portals now fall back to `https://api.anishnova.com/api` when `VITE_API_URL` is missing, local, or non-HTTPS. Production Socket.IO clients use the configured HTTPS socket origin, otherwise the configured API origin, and finally `https://api.anishnova.com`; they never contact localhost. Keep the explicit Vercel values above so deployments remain predictable. Development builds retain the localhost defaults. The Socket.IO URL is the API origin without `/api`; TLS termination must support WebSocket upgrades. Redeploy a portal after changing its variables.
 
 ## 4. Go-live verification
 

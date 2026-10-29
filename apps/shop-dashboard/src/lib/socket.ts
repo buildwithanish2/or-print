@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
+import { resolvePublicSocketUrl } from '../../../../packages/config/browser-urls.mjs';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = resolvePublicSocketUrl(import.meta.env.VITE_SOCKET_URL, import.meta.env.VITE_API_URL, import.meta.env.PROD);
 
 let socket: Socket | null = null;
 

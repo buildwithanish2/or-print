@@ -19,6 +19,23 @@ namespace AnishNovaInstaller
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             _targetDir = Path.Combine(localAppData, "Programs", "AnishNovaPrintAgent");
             InstallDirBox.Text = _targetDir;
+            ApplyExistingStartupPreference();
+        }
+
+        private void ApplyExistingStartupPreference()
+        {
+            var installedAgent = Path.Combine(_targetDir, "PrintQRAgent.exe");
+            if (!File.Exists(installedAgent)) return; // First install keeps the recommended default.
+
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+                AutoStartCheck.IsChecked = key?.GetValue("AnishNovaPrintAgent") is string;
+            }
+            catch (Exception ex)
+            {
+                App.LogInstallerError("Could not read the existing Windows startup preference", ex);
+            }
         }
 
         private async void InstallBtn_Click(object sender, RoutedEventArgs e)
@@ -153,6 +170,12 @@ namespace AnishNovaInstaller
                         var startMenu = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
                         var startMenuShortcut = Path.Combine(startMenu, "AnishNova Print Agent.lnk");
                         CreateShortcut(targetExePath, startMenuShortcut, _targetDir, "AnishNova Print Agent - Windows Desktop Spooler", targetIconPath);
+                    }
+                    else
+                    {
+                        var startMenu = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+                        var startMenuShortcut = Path.Combine(startMenu, "AnishNova Print Agent.lnk");
+                        if (File.Exists(startMenuShortcut)) File.Delete(startMenuShortcut);
                     }
 
                     App.LogInstallerInfo($"Desktop shortcut created with icon at: {desktopShortcut}");

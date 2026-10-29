@@ -19,6 +19,7 @@ namespace PrintQRAgent.Services
         private bool _isConnected;
         private bool _isApiConnected;
         private bool _isHeartbeatActive;
+        private readonly string? _configurationError;
         private readonly AgentPairingClient _pairingClient;
         private readonly AgentHeartbeatClient _heartbeatClient;
 
@@ -33,7 +34,8 @@ namespace PrintQRAgent.Services
         public WebSocketClientService(AgentConfig config, PrintSpoolerService spoolerService, OfflineQueueService queueService)
         {
             _config = config;
-            _config.ServerUrl = AgentApiEndpoint.NormalizeServerUrl(_config.ServerUrl);
+            try { _config.ServerUrl = AgentApiEndpoint.NormalizeForCurrentBuild(_config.ServerUrl); }
+            catch (FormatException ex) { _configurationError = ex.Message; }
             _spoolerService = spoolerService;
             _queueService = queueService;
             _httpClient.Timeout = TimeSpan.FromSeconds(10);
@@ -51,6 +53,8 @@ namespace PrintQRAgent.Services
         public void Stop()
         {
             _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = null;
             _isConnected = false;
             _isApiConnected = false;
             _isHeartbeatActive = false;
@@ -85,6 +89,7 @@ namespace PrintQRAgent.Services
         /// </summary>
         public async Task<(bool success, string message, string? shopName)> PairWithServerAsync(string pairingCode)
         {
+            if (_configurationError != null) return (false, _configurationError, null);
             try
             {
                 var result = await _pairingClient.PairAsync(pairingCode);
@@ -98,6 +103,7 @@ namespace PrintQRAgent.Services
             }
             catch (Exception ex)
             {
+                if (ex is FormatException) return (false, ex.Message, null);
                 LoggerService.LogWarn($"Pairing request failed ({ex.GetType().Name}). The pairing code and credential were not logged.");
                 return (false, "Could not reach the configured AnishNova Print API. Check this computer's internet connection and try again.", null);
             }
@@ -115,6 +121,11 @@ namespace PrintQRAgent.Services
 
             try
             {
+                if (_configurationError != null)
+                {
+                    _isApiConnected = false;
+                    return;
+                }
                 var printers = _spoolerService.GetInstalledPrinters();
                 using var request = AgentApiEndpoint.CreateAuthenticatedRequest(
                     HttpMethod.Post, _config.ServerUrl, "agents/printers/sync", _config.AgentToken);
@@ -149,6 +160,16 @@ namespace PrintQRAgent.Services
             {
                 try
                 {
+                    if (_configurationError != null)
+                    {
+                        _isConnected = false;
+                        _isApiConnected = false;
+                        _isHeartbeatActive = false;
+                        ConnectionStatusChanged?.Invoke(false, _configurationError);
+                        EmitHealthUpdate();
+                        await Task.Delay(TimeSpan.FromSeconds(30), token);
+                        continue;
+                    }
                     if (string.IsNullOrWhiteSpace(_config.AgentToken) || _config.AgentToken == "none")
                     {
                         _isConnected = false;
@@ -218,6 +239,10 @@ namespace PrintQRAgent.Services
                         await Task.Delay(TimeSpan.FromSeconds(retrySeconds), token);
                     }
                 }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
                     _isConnected = false;
@@ -225,7 +250,7 @@ namespace PrintQRAgent.Services
                     ConnectionStatusChanged?.Invoke(false, $"Reconnecting: {ex.Message}");
                     LoggerService.LogWarn($"Connection loop warning: {ex.Message}. Retrying in 5 seconds...");
                     EmitHealthUpdate();
-                    await Task.Delay(5000, token);
+                    if (!token.IsCancellationRequested) await Task.Delay(5000, token);
                 }
             }
         }
@@ -271,7 +296,7 @@ namespace PrintQRAgent.Services
             }
 
             await ReportJobStatusAsync(job, "DOWNLOADING", 20, null);
-            var (success, error) = await _spoolerService.PrintDocumentAsync(job, targetPrinter, AgentApiEndpoint.NormalizeServerUrl(_config.ServerUrl), _config.AgentToken ?? string.Empty, (progress) =>
+            var (success, error) = await _spoolerService.PrintDocumentAsync(job, targetPrinter, AgentApiEndpoint.NormalizeForCurrentBuild(_config.ServerUrl), _config.AgentToken ?? string.Empty, (progress) =>
             {
                 JobProgressUpdated?.Invoke(job.Id, progress, progress >= 90 ? "SENT_TO_SPOOLER" : "PRINTING");
                 if (progress >= 80) return ReportJobStatusAsync(job, "PRINTING", 80, null);

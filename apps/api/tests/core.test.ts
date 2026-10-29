@@ -20,7 +20,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
-import { getCustomerWebUrl } from '@printqr/config';
+import { getAdminWebUrl, getApiBaseUrl, getCustomerWebUrl, getShopWebUrl } from '@printqr/config';
 
 test('customer portal URL uses production domain when missing or set to localhost in production', () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -38,6 +38,37 @@ test('customer portal URL uses production domain when missing or set to localhos
     else process.env.NODE_ENV = originalNodeEnv;
     if (originalCustomerPortalUrl === undefined) delete process.env.CUSTOMER_PORTAL_URL;
     else process.env.CUSTOMER_PORTAL_URL = originalCustomerPortalUrl;
+  }
+});
+
+test('server-generated production portal and API URLs never fall back to localhost', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalApiPublicUrl = process.env.API_PUBLIC_URL;
+  const originalPublicApiUrl = process.env.PUBLIC_API_URL;
+  const originalShopPortalUrl = process.env.SHOP_PORTAL_URL;
+  const originalAppPublicUrl = process.env.APP_PUBLIC_URL;
+  const originalAdminPortalUrl = process.env.ADMIN_PORTAL_URL;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.API_PUBLIC_URL;
+    delete process.env.PUBLIC_API_URL;
+    delete process.env.SHOP_PORTAL_URL;
+    delete process.env.APP_PUBLIC_URL;
+    delete process.env.ADMIN_PORTAL_URL;
+    assert.equal(getApiBaseUrl(), 'https://api.anishnova.com');
+    assert.equal(getShopWebUrl(), 'https://shop-dashboard-one-eosin.vercel.app');
+    assert.equal(getAdminWebUrl(), 'https://or-print.vercel.app');
+    process.env.SHOP_PORTAL_URL = 'http://localhost:5174';
+    assert.equal(getShopWebUrl(), 'https://shop-dashboard-one-eosin.vercel.app');
+    process.env.ADMIN_PORTAL_URL = 'http://localhost:5175';
+    assert.equal(getAdminWebUrl(), 'https://or-print.vercel.app');
+  } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalNodeEnv;
+    if (originalApiPublicUrl === undefined) delete process.env.API_PUBLIC_URL; else process.env.API_PUBLIC_URL = originalApiPublicUrl;
+    if (originalPublicApiUrl === undefined) delete process.env.PUBLIC_API_URL; else process.env.PUBLIC_API_URL = originalPublicApiUrl;
+    if (originalShopPortalUrl === undefined) delete process.env.SHOP_PORTAL_URL; else process.env.SHOP_PORTAL_URL = originalShopPortalUrl;
+    if (originalAppPublicUrl === undefined) delete process.env.APP_PUBLIC_URL; else process.env.APP_PUBLIC_URL = originalAppPublicUrl;
+    if (originalAdminPortalUrl === undefined) delete process.env.ADMIN_PORTAL_URL; else process.env.ADMIN_PORTAL_URL = originalAdminPortalUrl;
   }
 });
 
