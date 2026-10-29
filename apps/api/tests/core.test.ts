@@ -58,6 +58,9 @@ test('server-generated production portal and API URLs never fall back to localho
     assert.equal(getApiBaseUrl(), 'https://api.anishnova.com');
     assert.equal(getShopWebUrl(), 'https://shop-dashboard-one-eosin.vercel.app');
     assert.equal(getAdminWebUrl(), 'https://or-print.vercel.app');
+    process.env.API_PUBLIC_URL = 'http://localhost:5000';
+    assert.equal(getApiBaseUrl(), 'https://api.anishnova.com');
+    delete process.env.API_PUBLIC_URL;
     process.env.SHOP_PORTAL_URL = 'http://localhost:5174';
     assert.equal(getShopWebUrl(), 'https://shop-dashboard-one-eosin.vercel.app');
     process.env.ADMIN_PORTAL_URL = 'http://localhost:5175';

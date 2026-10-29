@@ -194,12 +194,11 @@ export const SAAS_PLANS_DATA = [
 ];
 
 export const getApiBaseUrl = (): string => {
-  if (typeof process !== 'undefined' && (process.env?.API_PUBLIC_URL || process.env?.PUBLIC_API_URL)) {
-    return (process.env.API_PUBLIC_URL || process.env.PUBLIC_API_URL)!.replace(/\/$/, '');
-  }
-  return typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
-    ? 'https://api.anishnova.com'
-    : 'http://localhost:5000';
+  return resolveServerPortalUrl(
+    typeof process !== 'undefined' ? process.env?.API_PUBLIC_URL || process.env?.PUBLIC_API_URL : undefined,
+    'https://api.anishnova.com',
+    'http://localhost:5000',
+  );
 };
 
 const resolveServerPortalUrl = (configured: string | undefined, productionFallback: string, developmentFallback: string): string => {
