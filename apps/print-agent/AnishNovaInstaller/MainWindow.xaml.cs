@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
@@ -50,6 +52,18 @@ namespace AnishNovaInstaller
 
             try
             {
+                if (Process.GetProcessesByName("PrintQRAgent").Length > 0)
+                {
+                    MessageBox.Show(
+                        "AnishNova Print Agent is currently running. Exit it from the system tray, then run setup again so the upgrade can replace its files safely.",
+                        "Close the running agent first",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    InstallBtn.IsEnabled = true;
+                    CancelBtn.IsEnabled = true;
+                    return;
+                }
+
                 var targetExePath = Path.Combine(_targetDir, "PrintQRAgent.exe");
                 var assetsDir = Path.Combine(_targetDir, "assets");
                 var targetIconPath = Path.Combine(assetsDir, "app.ico");
@@ -60,20 +74,33 @@ namespace AnishNovaInstaller
                     if (!Directory.Exists(_targetDir)) Directory.CreateDirectory(_targetDir);
                     if (!Directory.Exists(assetsDir)) Directory.CreateDirectory(assetsDir);
 
-                    // 2. Extract embedded PrintQRAgent.exe payload
-                    bool extracted = false;
+                    // The installer must contain the exact agent built by the release script.
                     var assembly = Assembly.GetExecutingAssembly();
-                    
-                    using (var resStream = assembly.GetManifestResourceStream("PrintQRAgent.exe"))
+                    var expectedHash = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+                        .FirstOrDefault(attribute => attribute.Key == "AgentPayloadSha256")?.Value;
+                    if (string.IsNullOrWhiteSpace(expectedHash) || !System.Text.RegularExpressions.Regex.IsMatch(expectedHash, "^[a-fA-F0-9]{64}$"))
+                        throw new InvalidDataException("This installer does not contain valid release payload verification metadata.");
+
+                    var temporaryAgentPath = targetExePath + ".new";
+                    using (var resourceStream = assembly.GetManifestResourceStream("PrintQRAgent.exe")
+                        ?? throw new InvalidDataException("The agent executable is missing from this installer. Download setup again."))
                     {
-                        if (resStream != null)
+                        using var fileStream = File.Create(temporaryAgentPath);
+                        resourceStream.CopyTo(fileStream);
+                    }
+
+                    using (var payloadStream = File.OpenRead(temporaryAgentPath))
+                    {
+                        var actualHash = Convert.ToHexString(SHA256.HashData(payloadStream));
+                        if (!CryptographicOperations.FixedTimeEquals(
+                            Convert.FromHexString(actualHash), Convert.FromHexString(expectedHash)))
                         {
-                            using var fs = File.Create(targetExePath);
-                            resStream.CopyTo(fs);
-                            extracted = true;
-                            App.LogInstallerInfo($"Successfully extracted embedded PrintQRAgent.exe ({fs.Length} bytes).");
+                            File.Delete(temporaryAgentPath);
+                            throw new InvalidDataException("The embedded agent failed its integrity check. No application files were replaced.");
                         }
                     }
+                    File.Move(temporaryAgentPath, targetExePath, overwrite: true);
+                    App.LogInstallerInfo("Verified embedded Windows agent payload and installed it atomically.");
 
                     // Extract embedded app.ico
                     using (var icoStream = assembly.GetManifestResourceStream("app.ico"))
@@ -86,45 +113,6 @@ namespace AnishNovaInstaller
                         }
                     }
 
-                    // Fallback to searching current/adjacent directory if embedded stream was not found
-                    if (!extracted)
-                    {
-                        var currentDir = AppDomain.CurrentDomain.BaseDirectory;
-                        string[] possibleSources = new[]
-                        {
-                            Path.Combine(currentDir, "PrintQRAgent.exe"),
-                            Path.Combine(currentDir, "..", "PrintQRAgent", "bin", "Release", "net8.0-windows", "win-x64", "publish", "PrintQRAgent.exe"),
-                            Path.Combine(currentDir, "..", "PrintQRAgent", "bin", "Debug", "net8.0-windows", "PrintQRAgent.exe"),
-                            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PrintQRAgent.exe")
-                        };
-
-                        foreach (var src in possibleSources)
-                        {
-                            if (File.Exists(src))
-                            {
-                                File.Copy(src, targetExePath, true);
-                                App.LogInstallerInfo($"Copied payload from candidate: {src} to {targetExePath}");
-                                extracted = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Also copy adjacent DLLs or config if available
-                    var currentDirFiles = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory);
-                    foreach (var srcFile in currentDirFiles)
-                    {
-                        var fileName = Path.GetFileName(srcFile);
-                        if (fileName.Equals("AnishNovaPrintAgent-Setup.exe", StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        var destFile = Path.Combine(_targetDir, fileName);
-                        try
-                        {
-                            File.Copy(srcFile, destFile, true);
-                        }
-                        catch { }
-                    }
                 });
 
                 InstallProgressBar.Value = 60;
@@ -192,7 +180,7 @@ namespace AnishNovaInstaller
                     if (uninstKey != null)
                     {
                         uninstKey.SetValue("DisplayName", "AnishNova Print Agent");
-                        uninstKey.SetValue("DisplayVersion", "1.0.0");
+                        uninstKey.SetValue("DisplayVersion", Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.2");
                         uninstKey.SetValue("Publisher", "AnishNova Technologies");
                         uninstKey.SetValue("DisplayIcon", targetExePath);
                         var uninstCmd = $"cmd.exe /c reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v AnishNovaPrintAgent /f & del \"%USERPROFILE%\\Desktop\\AnishNova Print Agent.lnk\" 2>nul & del \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnishNova Print Agent.lnk\" 2>nul & del \"%LOCALAPPDATA%\\AnishNovaPrint\\agent-token.bin\" 2>nul & del \"%LOCALAPPDATA%\\AnishNovaPrint\\config.json\" 2>nul & reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AnishNovaPrintAgent\" /f & rmdir /s /q \"{_targetDir}\"";

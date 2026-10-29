@@ -13,10 +13,10 @@ namespace PrintQRAgent.Services
     public class UpdateManifest
     {
         [JsonPropertyName("latestVersion")]
-        public string LatestVersion { get; set; } = "1.0.0";
+        public string LatestVersion { get; set; } = "1.0.2";
 
         [JsonPropertyName("minimumSupportedVersion")]
-        public string MinimumSupportedVersion { get; set; } = "1.0.0";
+        public string MinimumSupportedVersion { get; set; } = "1.0.2";
 
         [JsonPropertyName("mandatory")]
         public bool Mandatory { get; set; }
@@ -50,8 +50,34 @@ namespace PrintQRAgent.Services
 
     public class UpdateService
     {
-        public static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
+        public static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.2";
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(60) };
+
+        public static string ValidateDownloadUrl(string downloadUrl, string configuredApiUrl)
+        {
+            if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var candidate)
+                || !Uri.TryCreate(AgentApiEndpoint.NormalizeForCurrentBuild(configuredApiUrl), UriKind.Absolute, out var api)
+                || candidate.Scheme != (api.IsLoopback && api.Scheme == Uri.UriSchemeHttp ? Uri.UriSchemeHttp : Uri.UriSchemeHttps)
+                || !string.IsNullOrEmpty(candidate.UserInfo)
+                || !string.IsNullOrEmpty(candidate.Query)
+                || !string.IsNullOrEmpty(candidate.Fragment)
+                || !string.Equals(candidate.Host, api.Host, StringComparison.OrdinalIgnoreCase)
+                || candidate.Port != api.Port
+                || !candidate.AbsolutePath.EndsWith("/api/admin/agents/download/binary/latest", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("The update manifest contains an unsafe or unexpected download URL.");
+            }
+
+            return candidate.AbsoluteUri;
+        }
+
+        public static bool IsValidSha256(string? value) =>
+            value != null && System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-fA-F0-9]{64}$");
+
+        public static bool IsNewerVersion(string? candidate, string? installed) =>
+            Version.TryParse(candidate, out var candidateVersion)
+            && Version.TryParse(installed, out var installedVersion)
+            && candidateVersion > installedVersion;
 
         public static async Task<UpdateCheckResult> CheckForUpdatesAsync(string serverUrl)
         {
@@ -79,11 +105,22 @@ namespace PrintQRAgent.Services
                 }
 
                 var current = Version.Parse(CurrentVersion);
-                var latest = Version.Parse(manifest.LatestVersion);
-                var minSupported = Version.Parse(manifest.MinimumSupportedVersion);
+                if (!Version.TryParse(manifest.LatestVersion, out var latest)
+                    || !Version.TryParse(manifest.MinimumSupportedVersion, out var minSupported))
+                    return new UpdateCheckResult { UpdateAvailable = false, Message = "The update service returned invalid version metadata." };
+
+                if (latest < current || minSupported > latest)
+                {
+                    return new UpdateCheckResult
+                    {
+                        UpdateAvailable = false,
+                        Message = "The update service returned an invalid or older release. No update was installed."
+                    };
+                }
 
                 var isUpdateAvailable = latest > current;
                 var isMandatory = manifest.Mandatory || (current < minSupported);
+                if (isUpdateAvailable) _ = ValidateDownloadUrl(manifest.DownloadUrl, serverUrl);
 
                 return new UpdateCheckResult
                 {
@@ -101,7 +138,7 @@ namespace PrintQRAgent.Services
                 return new UpdateCheckResult
                 {
                     UpdateAvailable = false,
-                    Message = $"Unable to check for updates: {ex.Message}"
+                Message = "Unable to check for updates. Confirm this computer can reach the configured API and try again."
                 };
             }
         }
@@ -118,8 +155,9 @@ namespace PrintQRAgent.Services
                 var updatesDir = Path.Combine(localAppData, "AnishNovaPrint", "updates");
                 if (!Directory.Exists(updatesDir)) Directory.CreateDirectory(updatesDir);
 
-                var stagedExePath = Path.Combine(updatesDir, "PrintQRAgent.new.exe");
-                var batchScriptPath = Path.Combine(updatesDir, "apply-update.cmd");
+                var agentProcessId = Environment.ProcessId;
+                var stagedExePath = Path.Combine(updatesDir, $"PrintQRAgent.new-{agentProcessId}.exe");
+                var updateScriptPath = Path.Combine(updatesDir, $"apply-update-{agentProcessId}.ps1");
                 var targetExePath = Path.Combine(localAppData, "Programs", "AnishNovaPrintAgent", "PrintQRAgent.exe");
 
                 // If running in development without installation folder, fallback to current exe location
@@ -128,18 +166,26 @@ namespace PrintQRAgent.Services
                     targetExePath = Process.GetCurrentProcess().MainModule?.FileName ?? targetExePath;
                 }
 
-                var downloadUrl = manifest.DownloadUrl;
-                if (string.IsNullOrEmpty(downloadUrl))
-                {
-                    downloadUrl = AgentApiEndpoint.BuildApiUri(App.Config.ServerUrl, "admin/agents/download/binary/latest").AbsoluteUri;
-                }
+                if (!IsNewerVersion(manifest.LatestVersion, CurrentVersion))
+                    return (false, "The update is not newer than the installed version. Downgrades are not permitted.");
+                if (manifest.FileSize < 1024 * 1024 || !IsValidSha256(manifest.Sha256))
+                    return (false, "The update manifest is missing valid size or checksum information.");
 
-                LoggerService.LogInfo($"Downloading in-place update from: {downloadUrl}");
+                var fallbackDownloadUrl = AgentApiEndpoint.BuildApiUri(App.Config.ServerUrl, "admin/agents/download/binary/latest").AbsoluteUri;
+                var downloadUrl = ValidateDownloadUrl(
+                    string.IsNullOrWhiteSpace(manifest.DownloadUrl) ? fallbackDownloadUrl : manifest.DownloadUrl,
+                    App.Config.ServerUrl);
 
                 using (var response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
                 {
                     response.EnsureSuccessStatusCode();
-                    var totalBytes = response.Content.Headers.ContentLength ?? (manifest.FileSize > 0 ? manifest.FileSize : 71600000);
+                    if (response.RequestMessage?.RequestUri is not Uri finalUri
+                        || !string.Equals(finalUri.Host, new Uri(downloadUrl).Host, StringComparison.OrdinalIgnoreCase)
+                        || finalUri.Scheme != Uri.UriSchemeHttps)
+                        return (false, "The update server redirected to an unexpected download location.");
+                    var totalBytes = response.Content.Headers.ContentLength ?? manifest.FileSize;
+                    if (totalBytes != manifest.FileSize)
+                        return (false, "The update size did not match the release metadata.");
 
                     using var contentStream = await response.Content.ReadAsStreamAsync();
                     using var fileStream = new FileStream(stagedExePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
@@ -150,6 +196,8 @@ namespace PrintQRAgent.Services
 
                     while ((read = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                     {
+                        if (totalRead + read > manifest.FileSize)
+                            return (false, "The downloaded update exceeded the size declared by the release manifest.");
                         await fileStream.WriteAsync(buffer, 0, read);
                         totalRead += read;
                         if (totalBytes > 0)
@@ -168,7 +216,7 @@ namespace PrintQRAgent.Services
                     return (false, "Downloaded update package is incomplete.");
                 }
 
-                if (manifest.FileSize <= 0 || fileInfo.Length != manifest.FileSize || string.IsNullOrWhiteSpace(manifest.Sha256))
+                if (fileInfo.Length != manifest.FileSize)
                 {
                     File.Delete(stagedExePath);
                     return (false, "Downloaded update did not match the release metadata.");
@@ -178,37 +226,76 @@ namespace PrintQRAgent.Services
                 {
                     var actualHash = Convert.ToHexString(await SHA256.HashDataAsync(stagedStream)).ToLowerInvariant();
                     if (!CryptographicOperations.FixedTimeEquals(
-                        System.Text.Encoding.ASCII.GetBytes(actualHash),
-                        System.Text.Encoding.ASCII.GetBytes(manifest.Sha256.Trim().ToLowerInvariant())))
+                        Convert.FromHexString(actualHash), Convert.FromHexString(manifest.Sha256!.Trim())))
                     {
                         File.Delete(stagedExePath);
                         return (false, "Downloaded update failed its integrity check.");
                     }
                 }
 
+                await using (var stagedStream = File.OpenRead(stagedExePath))
+                {
+                    var signature = new byte[2];
+                    if (await stagedStream.ReadAsync(signature) != 2 || signature[0] != (byte)'M' || signature[1] != (byte)'Z')
+                    {
+                        File.Delete(stagedExePath);
+                        return (false, "The downloaded update is not a valid Windows executable.");
+                    }
+                }
+
                 progressCallback(96, "Preparing atomic in-place restart...");
 
-                // Write atomic update script that replaces binary and restarts immediately without setup wizards
-                var batchContent = $@"@echo off
-timeout /t 1 /nobreak > nul
-:retry_copy
-taskkill /f /im PrintQRAgent.exe > nul 2>&1
-timeout /t 1 /nobreak > nul
-copy /y ""{stagedExePath}"" ""{targetExePath}"" > nul
-if errorlevel 1 goto retry_copy
-del ""{stagedExePath}"" > nul 2>&1
-start """" ""{targetExePath}""
-exit
+                // Wait only for this process; do not terminate unrelated agents or loop forever.
+                static string PsQuote(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+                var backupExePath = targetExePath + $".previous-{agentProcessId}";
+                var updateScript = $@"$ErrorActionPreference = 'Stop'
+$agentPid = {agentProcessId}
+$staged = {PsQuote(stagedExePath)}
+$target = {PsQuote(targetExePath)}
+$backup = {PsQuote(backupExePath)}
+$started = $null
+$deadline = [DateTime]::UtcNow.AddSeconds(30)
+while ((Get-Process -Id $agentPid -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) {{ Start-Sleep -Milliseconds 250 }}
+if (Get-Process -Id $agentPid -ErrorAction SilentlyContinue) {{ throw 'Agent did not exit in time.' }}
+try {{
+  for ($attempt = 1; $attempt -le 8; $attempt++) {{
+    try {{
+      if (Test-Path -LiteralPath $target) {{ Move-Item -LiteralPath $target -Destination $backup -Force }}
+      Move-Item -LiteralPath $staged -Destination $target -Force
+      if ((Get-Item -LiteralPath $target).Length -lt 1048576) {{ throw 'Updated agent is incomplete.' }}
+      $started = Start-Process -FilePath $target -WorkingDirectory (Split-Path -Parent $target) -PassThru
+      Start-Sleep -Seconds 2
+      if ($started.HasExited) {{ throw 'Updated agent did not start.' }}
+      Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+      exit 0
+    }} catch {{
+      if (Test-Path -LiteralPath $backup) {{
+        if ($started -and !$started.HasExited) {{ Stop-Process -Id $started.Id -Force -ErrorAction SilentlyContinue }}
+        Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $backup -Destination $target -Force
+      }}
+      Start-Sleep -Seconds 2
+    }}
+  }}
+  throw 'Could not replace the agent after several safe attempts.'
+}} catch {{
+  if (Test-Path -LiteralPath $backup) {{
+    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+    Move-Item -LiteralPath $backup -Destination $target -Force
+  }}
+  if (Test-Path -LiteralPath $target) {{ Start-Process -FilePath $target -WorkingDirectory (Split-Path -Parent $target) }}
+  exit 1
+}}
 ";
-                File.WriteAllText(batchScriptPath, batchContent);
-                LoggerService.LogInfo($"Update batch script generated at: {batchScriptPath}");
+                File.WriteAllText(updateScriptPath, updateScript);
+                LoggerService.LogInfo("Verified update package and started the bounded update worker.");
 
                 progressCallback(100, "Restarting AnishNova Print Agent...");
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c \"{batchScriptPath}\"",
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{updateScriptPath}\"",
                     CreateNoWindow = true,
                     UseShellExecute = false
                 };

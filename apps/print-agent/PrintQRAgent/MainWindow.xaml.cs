@@ -21,6 +21,8 @@ namespace PrintQRAgent
         private readonly WebSocketClientService _wsService;
         private readonly ObservableCollection<PrintJobPayload> _jobsList = new();
         private bool _isMasked = true;
+        private bool _backgroundServicesStarted;
+        private bool _allowClose;
 
         public MainWindow()
         {
@@ -73,6 +75,9 @@ namespace PrintQRAgent
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            if (_backgroundServicesStarted) return;
+            _backgroundServicesStarted = true;
+
             var existingCode = App.Config.PairingCode ?? string.Empty;
             PairingCodePasswordBox.Password = existingCode;
             PairingCodeTextBox.Text = existingCode;
@@ -440,11 +445,21 @@ namespace PrintQRAgent
 
         private void MainWindow_Closing(object? sender, CancelEventArgs e)
         {
-            if (App.Config.MinimizeToTrayOnClose)
+            if (!_allowClose && App.Config.MinimizeToTrayOnClose)
             {
                 e.Cancel = true;
                 Hide();
             }
+            else
+            {
+                _wsService.Stop();
+            }
+        }
+
+        public void PrepareForExit()
+        {
+            _allowClose = true;
+            _wsService.Stop();
         }
     }
 }

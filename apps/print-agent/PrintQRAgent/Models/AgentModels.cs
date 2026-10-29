@@ -144,6 +144,6 @@ namespace PrintQRAgent.Models
         public bool IsHeartbeatActive { get; set; }
         public int DiscoveredPrintersCount { get; set; }
 
-        public bool IsFullyOnline => IsPaired && IsApiConnected && IsSpoolerRunning;
+        public bool IsFullyOnline => IsPaired && IsApiConnected && IsHeartbeatActive && IsSpoolerRunning;
     }
 }

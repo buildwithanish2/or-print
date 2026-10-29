@@ -49,7 +49,7 @@ namespace PrintQRAgent
             };
 
             LoggerService.LogInfo("==================================================");
-            LoggerService.LogInfo("AnishNova Print Agent v1.0.0 starting...");
+            LoggerService.LogInfo($"AnishNova Print Agent v{UpdateService.CurrentVersion} starting...");
             LoggerService.LogInfo($"OS: {Environment.OSVersion}, .NET: {Environment.Version}, 64-bit: {Environment.Is64BitProcess}");
             LoggerService.LogInfo($"Log Path: {LoggerService.GetLogPath()}");
 
@@ -67,7 +67,9 @@ namespace PrintQRAgent
             {
                 LoggerService.LogInfo($"Found existing active pairing{(string.IsNullOrWhiteSpace(Config.ShopName) ? string.Empty : $" for shop {Config.ShopName}")}. Running in System Tray.");
                 _mainWindow.WindowState = WindowState.Minimized;
-                _mainWindow.Hide();
+                _mainWindow.Loaded += (_, _) => _mainWindow.Hide();
+                // Show once so WPF raises Loaded and starts the background loop.
+                _mainWindow.Show();
             }
             else
             {
@@ -222,7 +224,15 @@ namespace PrintQRAgent
         {
             LoggerService.LogInfo("Agent shutdown requested by user.");
             _notifyIcon?.Dispose();
-            Shutdown();
+            if (_mainWindow != null)
+            {
+                _mainWindow.PrepareForExit();
+                _mainWindow.Close();
+            }
+            else
+            {
+                Shutdown();
+            }
         }
 
         protected override void OnExit(ExitEventArgs e)

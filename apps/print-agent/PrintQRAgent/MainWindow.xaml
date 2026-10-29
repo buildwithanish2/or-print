@@ -169,7 +169,7 @@
                             <TextBlock Text="AnishNova " FontSize="21" FontWeight="Black" Foreground="#ffffff"/>
                             <TextBlock Text="Print Agent" FontSize="21" FontWeight="Bold" Foreground="#c084fc"/>
                         </StackPanel>
-                        <TextBlock Text="Windows Desktop Spooler Daemon · v1.0.0 · AnishNova Technologies" FontSize="11" Foreground="#94a3b8"/>
+                        <TextBlock Text="Windows Desktop Spooler Daemon · v1.0.2 · AnishNova Technologies" FontSize="11" Foreground="#94a3b8"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -247,7 +247,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Discovered Windows Printers" FontSize="14" FontWeight="Bold" Foreground="#e2e8f0"/>
                         <!-- Update status indicator badge -->
-                        <TextBlock x:Name="VersionBadgeText" Grid.Column="1" Text="v1.0.0 (Latest)" FontSize="11" FontWeight="SemiBold" Foreground="#a855f7"/>
+                        <TextBlock x:Name="VersionBadgeText" Grid.Column="1" Text="v1.0.2 (Latest)" FontSize="11" FontWeight="SemiBold" Foreground="#a855f7"/>
                     </Grid>
 
                     <TextBlock Text="Select target Windows print spooler destination:" FontSize="11" Foreground="#94a3b8" Margin="0,0,0,8"/>

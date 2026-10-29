@@ -43,16 +43,18 @@ The final download response must be HTTP 200, `application/vnd.microsoft.portabl
 
 The public agent installer and update download routes are intentionally registered before the admin authentication middleware because shop owners download the setup from the dashboard. They serve only the two fixed artifacts after manifest, file-size and PE-header readiness checks. The installer route increments its download count only after readiness succeeds. The API does not expose local filesystem paths in failure responses.
 
-## Local release produced during this task
+## Release 1.0.2 prepared locally (2026-10-29)
 
-Windows x64 self-contained .NET 8 publishing succeeded on 2026-10-29. The artifacts were validated by `node apps/api/scripts/verify-agent-release.cjs`:
+Windows x64 self-contained .NET 8 publishing succeeded on a Windows build machine. The release script and Windows embedded-payload verification passed:
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `AnishNovaPrintAgent-Setup.exe` | 152182367 | `3b47073b8348ac264f61f402d6f497d727600a56088db816702399d61f190681` |
-| `PrintQRAgent.exe` | 80498598 | `33ff0dc0f1a7100b06a099cf511fc8155e694808ff2e3ed89b036f659d30b4da` |
+| `AnishNovaPrintAgent-Setup.exe` | 152189023 | `17b645bca2375749afcaf0072f4fa5c3fe580ce860105daf2cc6d010732c8fdf` |
+| `PrintQRAgent.exe` | 80502895 | `48e229908edbb920c2914638c9c3d745537b318d5e27b4321b5d8806ad75df04` |
 
-These are ignored local build artifacts, not committed files, and have not been copied to production.
+The artifacts are in `E:\or-print-agent-release-1.0.2` on the release workstation. They are not committed and have not been copied to production. The live API was checked read-only on 2026-10-29 and still advertised release `1.0.0`; production download `HEAD` returned the old 152182367-byte installer. Therefore release 1.0.2 is locally verified, not published to the production API. The setup executable is unsigned because no signing certificate was available; Windows SmartScreen may warn users.
+
+For a clean install, run the setup executable and follow its per-user installer prompts. For an upgrade, exit the running agent from its tray menu before setup; setup refuses to replace files while the agent is running. User configuration and DPAPI-protected pairing credentials are retained by the installer. No Windows installation or upgrade was exercised as part of the artifact build.
 
 ## Pairing and operational limits
 

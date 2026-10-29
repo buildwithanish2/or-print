@@ -79,7 +79,7 @@ namespace PrintQRAgent.Services
                 pairingCode = pairingCode.Trim().ToUpperInvariant(),
                 deviceName = Environment.MachineName,
                 platform = "windows-x64",
-                agentVersion = "1.0.0"
+                agentVersion = UpdateService.CurrentVersion
             };
 
             using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -147,7 +147,7 @@ namespace PrintQRAgent.Services
             {
                 status = "CONNECTED",
                 printerCount,
-                version = "1.0.0",
+                version = UpdateService.CurrentVersion,
                 deviceName = Environment.MachineName
             }), Encoding.UTF8, "application/json");
 

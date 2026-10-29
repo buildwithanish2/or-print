@@ -31,6 +31,40 @@ public sealed class AgentConnectionTests
     }
 
     [Fact]
+    public void UpdateManifestDownloadMustUseTheConfiguredHttpsApiAndExpectedPath()
+    {
+        Assert.Equal("https://api.anishnova.com/api/admin/agents/download/binary/latest",
+            UpdateService.ValidateDownloadUrl(
+                "https://api.anishnova.com/api/admin/agents/download/binary/latest",
+                "https://api.anishnova.com"));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ValidateDownloadUrl(
+            "https://attacker.example/file.exe", "https://api.anishnova.com"));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ValidateDownloadUrl(
+            "http://api.anishnova.com/api/admin/agents/download/binary/latest", "https://api.anishnova.com"));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ValidateDownloadUrl(
+            "https://api.anishnova.com/api/admin/agents/download/binary/latest?token=private", "https://api.anishnova.com"));
+    }
+
+    [Fact]
+    public void UpdatesRequireAValidNewerVersionAndChecksum()
+    {
+        Assert.True(UpdateService.IsNewerVersion("1.0.2", "1.0.0"));
+        Assert.False(UpdateService.IsNewerVersion("1.0.0", "1.0.2"));
+        Assert.False(UpdateService.IsNewerVersion("not-a-version", "1.0.0"));
+        Assert.True(UpdateService.IsValidSha256(new string('a', 64)));
+        Assert.False(UpdateService.IsValidSha256("not-a-checksum"));
+    }
+
+    [Fact]
+    public void OnlineStatusRequiresSuccessfulHeartbeat()
+    {
+        var health = new HealthState { IsPaired = true, IsApiConnected = true, IsSpoolerRunning = true };
+        Assert.False(health.IsFullyOnline);
+        health.IsHeartbeatActive = true;
+        Assert.True(health.IsFullyOnline);
+    }
+
+    [Fact]
     public async Task PairingUsesCloudApiAndPersistsServerConfirmedShopAndDevice()
     {
         var handler = new RecordingHandler((request, _) =>

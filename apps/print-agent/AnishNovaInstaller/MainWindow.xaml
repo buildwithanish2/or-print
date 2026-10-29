@@ -28,7 +28,7 @@
                         <TextBlock Text="AnishNova " FontSize="18" FontWeight="Black" Foreground="#ffffff"/>
                         <TextBlock Text="Print Agent Setup" FontSize="18" FontWeight="Bold" Foreground="#c084fc"/>
                     </StackPanel>
-                    <TextBlock Text="Windows Desktop Spooler Installer v1.0.0" FontSize="11" Foreground="#94a3b8"/>
+                    <TextBlock Text="Windows Desktop Spooler Installer v1.0.2" FontSize="11" Foreground="#94a3b8"/>
                 </StackPanel>
             </StackPanel>
         </Border>
