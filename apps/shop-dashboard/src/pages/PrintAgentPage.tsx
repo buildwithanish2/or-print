@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, API_BASE_URL } from '../lib/api';
-import { getAgentInstallerUrl, parseAgentReleaseResponse, type AgentRelease } from '../lib/agent-release';
+import { createAgentReleaseRequestConfig, getAgentInstallerUrl, parseAgentReleaseResponse, type AgentRelease } from '../lib/agent-release';
 import {
   Laptop,
   Download,
@@ -32,10 +32,9 @@ export const PrintAgentPage: React.FC = () => {
     setLoadingRelease(true);
     setReleaseError('');
     try {
-      const response = await api.get('/agents/update/latest', {
-        params: { channel: 'stable', refresh: Date.now() },
-        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-      });
+      // A unique query parameter avoids stale intermediary caches without adding
+      // non-simple headers that would fail the API's credentialed CORS preflight.
+      const response = await api.get('/agents/update/latest', createAgentReleaseRequestConfig(Date.now()));
       setAgentRelease(parseAgentReleaseResponse(response.data, API_BASE_URL));
     } catch (error) {
       setAgentRelease(null);

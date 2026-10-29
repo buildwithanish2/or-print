@@ -4,6 +4,10 @@ export interface AgentRelease {
   downloadUrl: string;
 }
 
+export function createAgentReleaseRequestConfig(refreshKey: number) {
+  return { params: { channel: 'stable', refresh: refreshKey } };
+}
+
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 export function parseAgentReleaseResponse(payload: unknown, apiBaseUrl: string): AgentRelease {

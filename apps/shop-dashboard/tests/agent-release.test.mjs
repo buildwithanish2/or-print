@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { getAgentInstallerUrl, parseAgentReleaseResponse } from '../src/lib/agent-release.ts';
+import { createAgentReleaseRequestConfig, getAgentInstallerUrl, parseAgentReleaseResponse } from '../src/lib/agent-release.ts';
 
 const apiBase = 'https://api.anishnova.com/api';
 const releaseResponse = {
@@ -18,6 +18,12 @@ test('dashboard release label and installer URL come from the current API releas
   assert.equal(release.minimumSupportedVersion, '1.0.2');
   assert.equal(release.downloadUrl, releaseResponse.data.downloadUrl);
   assert.equal(getAgentInstallerUrl(apiBase), 'https://api.anishnova.com/api/admin/agents/download/latest');
+});
+
+test('release refresh uses a cache-busting query without CORS-blocked request headers', () => {
+  const config = createAgentReleaseRequestConfig(12345);
+  assert.deepEqual(config, { params: { channel: 'stable', refresh: 12345 } });
+  assert.equal('headers' in config, false);
 });
 
 test('malformed, missing, and failed release manifests are rejected instead of showing a hardcoded version', () => {
