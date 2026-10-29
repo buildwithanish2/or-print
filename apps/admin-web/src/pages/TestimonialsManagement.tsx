@@ -283,6 +283,17 @@ export const TestimonialsManagement: React.FC = () => {
               </div>
             </div>
 
+            <div className="flex flex-wrap gap-5 border-t border-slate-800 pt-3">
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input type="checkbox" checked={isApproved} onChange={(e) => setIsApproved(e.target.checked)} />
+                <span>Approved for public display</span>
+              </label>
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input type="checkbox" checked={isFeatured} onChange={(e) => setIsFeatured(e.target.checked)} />
+                <span>Featured</span>
+              </label>
+            </div>
+
             <div className="grid grid-cols-2 gap-2 pt-2">
               <button
                 type="button"

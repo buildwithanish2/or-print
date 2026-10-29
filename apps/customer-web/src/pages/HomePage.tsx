@@ -187,6 +187,26 @@ const FAQ_ITEMS = [
   },
 ];
 
+const DEFAULT_PUBLIC_NAVIGATION = [
+  { id: 'home', label: 'Home', path: '#', icon: Home, iconBg: 'bg-purple-100', iconColor: 'text-purple-700' },
+  { id: 'pricing', label: 'Pricing', path: '#pricing', icon: CreditCard, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-700' },
+  { id: 'how-it-works', label: 'How It Works', path: '#how-it-works', icon: Zap, iconBg: 'bg-amber-100', iconColor: 'text-amber-700' },
+  { id: 'features', label: 'Features', path: '#features', icon: Sparkles, iconBg: 'bg-pink-100', iconColor: 'text-pink-700' },
+  { id: 'windows-agent', label: 'Windows Agent', path: '#windows-agent', icon: Laptop, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-700' },
+];
+
+const safePublicLink = (path: unknown, isExternal: boolean) => {
+  if (typeof path !== 'string') return '#';
+  const value = path.trim();
+  if (!isExternal) return value.startsWith('#') || (value.startsWith('/') && !value.startsWith('//')) ? value : '#';
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : '#';
+  } catch {
+    return '#';
+  }
+};
+
 interface HomePageProps {
   onNavigateToShopRegister: () => void;
   onNavigateToLegal?: (slug: string) => void;
@@ -204,6 +224,9 @@ export const HomePage: React.FC<HomePageProps> = ({
     videoUrl: 'https://www.youtube-nocookie.com/embed/qOPE-90Um8g',
     isActive: true,
   });
+  const [demoVideoVisible, setDemoVideoVisible] = useState(true);
+  const [publicNavigation, setPublicNavigation] = useState<any[] | null>(null);
+  const [homepageBanners, setHomepageBanners] = useState<any[] | null>(null);
   const [stats, setStats] = useState<Record<string, string>>({
     STATS_SHOPS: '450+',
     STATS_DOCS: '1.2M+',
@@ -284,7 +307,9 @@ export const HomePage: React.FC<HomePageProps> = ({
     };
   }, [mobileMenuOpen, showContactModal, showPartnerModal, showVideoModal]);
 
-  // Fetch dynamic plans, testimonials, and published legal pages from backend
+  // Fetch dynamic public content from the backend. Keep the existing landing
+  // defaults if the API is temporarily unavailable, but honor an explicit
+  // disabled/empty video response so Admin changes are reflected publicly.
   useEffect(() => {
     fetch(`${API_BASE_URL}/plans/public`)
       .then((r) => r.json())
@@ -321,6 +346,36 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (res.success && res.data) {
           setStats((prev) => ({ ...prev, ...res.data }));
         }
+      })
+      .catch(() => {});
+
+    fetch(`${API_BASE_URL}/demo-video/public`, { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to load the public demo video');
+        return response.json();
+      })
+      .then((res) => {
+        if (!res?.success) return;
+        if (res.data && typeof res.data.videoUrl === 'string' && res.data.videoUrl) {
+          setDemoVideo(res.data);
+          setDemoVideoVisible(res.data.isActive !== false);
+        } else {
+          setDemoVideoVisible(false);
+        }
+      })
+      .catch(() => {});
+
+    fetch(`${API_BASE_URL}/navigation/public`, { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Navigation request failed')))
+      .then((res) => {
+        if (res?.success && Array.isArray(res.data)) setPublicNavigation(res.data);
+      })
+      .catch(() => {});
+
+    fetch(`${API_BASE_URL}/banners/public`, { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Banner request failed')))
+      .then((res) => {
+        if (res?.success && Array.isArray(res.data)) setHomepageBanners(res.data);
       })
       .catch(() => {});
 
@@ -408,19 +463,28 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   };
 
+  const navigationItems = publicNavigation ?? DEFAULT_PUBLIC_NAVIGATION;
+  const banner = homepageBanners === null ? undefined : homepageBanners[0];
+  const handlePublicNavigation = (event: React.MouseEvent<HTMLAnchorElement>, item: any) => {
+    if (!item.isExternal && typeof item.path === 'string' && item.path.startsWith('#')) {
+      event.preventDefault();
+      handleNavClick(item.path);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FFFDF9] text-[#080B20] font-sans selection:bg-purple-500 selection:text-white relative overflow-x-hidden bg-dot-pattern">
       {/* 1. SLIM TOP ANNOUNCEMENT BAR */}
-      <div className="bg-gradient-to-r from-purple-700 via-indigo-700 to-pink-600 text-white text-xs py-2 px-4 text-center font-medium flex items-center justify-center space-x-2">
-        <span className="truncate">🚀 Launch AnishNova Print at Your Counter — Connect your Windows printer in minutes.</span>
-        <button
-          type="button"
-          onClick={onNavigateToShopRegister}
-          className="underline font-bold hover:text-amber-200 ml-1 inline-flex items-center flex-shrink-0"
-        >
-          <span>Register Your Shop →</span>
-        </button>
-      </div>
+      {(homepageBanners === null || banner) && <div className={`bg-gradient-to-r ${banner?.bgGradient || 'from-purple-700 via-indigo-700 to-pink-600'} text-white text-xs py-2 px-4 text-center font-medium flex items-center justify-center space-x-2`}>
+        <span className="truncate">{banner ? <>{banner.title}{banner.subtitle ? ` — ${banner.subtitle}` : ''}</> : '🚀 Launch AnishNova Print at Your Counter — Connect your Windows printer in minutes.'}</span>
+        {banner?.ctaText ? (
+          <a href={safePublicLink(banner.ctaUrl, /^https?:\/\//i.test(banner.ctaUrl || ''))} target={/^https?:\/\//i.test(banner.ctaUrl || '') ? '_blank' : undefined} rel="noopener noreferrer" onClick={(event) => {
+            const target = safePublicLink(banner.ctaUrl, /^https?:\/\//i.test(banner.ctaUrl || ''));
+            if (target === '/shop/register' || target === '/register') { event.preventDefault(); onNavigateToShopRegister(); }
+            else if (target.startsWith('#')) { event.preventDefault(); handleNavClick(target); }
+          }} className="underline font-bold hover:text-amber-200 ml-1 inline-flex items-center flex-shrink-0">{banner.ctaText} →</a>
+        ) : !banner ? <button type="button" onClick={onNavigateToShopRegister} className="underline font-bold hover:text-amber-200 ml-1 inline-flex items-center flex-shrink-0"><span>Register Your Shop →</span></button> : null}
+      </div>}
 
       {/* 2. MAIN HEADER NAVBAR (Z-INDEX 1100, SINGLE SOURCE OF TRUTH) */}
       <header
@@ -448,21 +512,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           {/* Desktop Navigation Links (> 768px / lg) */}
           <nav className="hidden lg:flex items-center space-x-7 text-xs font-bold text-slate-700">
-            <a href="#" className="hover:text-purple-600 transition-colors">
-              Home
-            </a>
-            <a href="#pricing" className="hover:text-purple-600 transition-colors">
-              Pricing
-            </a>
-            <a href="#how-it-works" className="hover:text-purple-600 transition-colors">
-              How It Works
-            </a>
-            <a href="#features" className="hover:text-purple-600 transition-colors">
-              Features
-            </a>
-            <a href="#windows-agent" className="hover:text-purple-600 transition-colors">
-              Windows Agent
-            </a>
+            {navigationItems.map((item: any) => <a key={item.id} href={safePublicLink(item.path, Boolean(item.isExternal))} target={item.isExternal && item.openInNewTab ? '_blank' : undefined} rel={item.isExternal && item.openInNewTab ? 'noopener noreferrer' : undefined} onClick={(event) => handlePublicNavigation(event, item)} className="hover:text-purple-600 transition-colors">{item.label}</a>)}
             <button
               type="button"
               onClick={() => {
@@ -549,40 +599,31 @@ export const HomePage: React.FC<HomePageProps> = ({
             <span className="text-[11px] font-bold text-slate-400">AnishNova Print</span>
           </div>
 
-          {[
-            { label: 'Home', href: '#', icon: Home, iconBg: 'bg-purple-100', iconColor: 'text-purple-700' },
-            { label: 'Pricing Plans', href: '#pricing', icon: CreditCard, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-700' },
-            { label: 'How It Works', href: '#how-it-works', icon: Zap, iconBg: 'bg-amber-100', iconColor: 'text-amber-700' },
-            { label: 'Features', href: '#features', icon: Sparkles, iconBg: 'bg-pink-100', iconColor: 'text-pink-700' },
-            { label: 'Windows Print Agent', href: '#windows-agent', icon: Laptop, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-700', badge: 'v1.0' },
-          ].map((item, idx) => (
+          {navigationItems.map((item: any, idx: number) => {
+            const fallback = DEFAULT_PUBLIC_NAVIGATION[idx % DEFAULT_PUBLIC_NAVIGATION.length];
+            const Icon = fallback.icon;
+            return (
             <a
-              key={idx}
-              href={item.href}
-              onClick={(e) => {
-                e.preventDefault();
-                handleNavClick(item.href);
-              }}
+              key={item.id || `${item.label}-${idx}`}
+              href={safePublicLink(item.path, Boolean(item.isExternal))}
+              target={item.isExternal && item.openInNewTab ? '_blank' : undefined}
+              rel={item.isExternal && item.openInNewTab ? 'noopener noreferrer' : undefined}
+              onClick={(event) => { handlePublicNavigation(event, item); setMobileMenuOpen(false); }}
               className="flex items-center justify-between p-2.5 rounded-2xl hover:bg-slate-50 active:bg-purple-50/50 transition-colors group"
             >
               <div className="flex items-center space-x-3">
-                <div className={`w-9 h-9 rounded-xl ${item.iconBg} ${item.iconColor} flex items-center justify-center flex-shrink-0 shadow-xs group-hover:scale-105 transition-transform`}>
-                  <item.icon className="w-4 h-4" />
+                <div className={`w-9 h-9 rounded-xl ${item.iconBg || fallback.iconBg} ${item.iconColor || fallback.iconColor} flex items-center justify-center flex-shrink-0 shadow-xs group-hover:scale-105 transition-transform`}>
+                  <Icon className="w-4 h-4" />
                 </div>
                 <span className="text-[15px] font-bold text-slate-800 group-hover:text-purple-700 transition-colors">
                   {item.label}
                 </span>
               </div>
               <div className="flex items-center space-x-2">
-                {item.badge && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
-                    {item.badge}
-                  </span>
-                )}
                 <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-600 transition-colors" />
               </div>
             </a>
-          ))}
+          );})}
 
           <button
             type="button"
@@ -895,7 +936,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       {/* 6. HOW IT WORKS & DEMO VIDEO */}
-      <section id="how-it-works" className="scroll-mt-24 md:scroll-mt-28 py-16 md:py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      {demoVideoVisible && <section id="how-it-works" className="scroll-mt-24 md:scroll-mt-28 py-16 md:py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12">
           <span className="text-xs font-black text-purple-600 uppercase tracking-widest">
             SEE HOW ANISHNOVA PRINT WORKS
@@ -912,13 +953,17 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="max-w-4xl mx-auto rounded-3xl p-2 bg-gradient-to-tr from-purple-600 via-pink-600 to-orange-400 shadow-2xl">
           <div className="relative rounded-2.5xl overflow-hidden bg-slate-950 aspect-video flex items-center justify-center group">
             {showVideoModal ? (
-              <iframe
-                src={demoVideo.videoUrl}
-                title={demoVideo.title}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
+              demoVideo.provider === 'DIRECT' ? (
+                <video src={demoVideo.videoUrl} title={demoVideo.title} className="w-full h-full" controls autoPlay playsInline />
+              ) : (
+                <iframe
+                  src={demoVideo.videoUrl}
+                  title={demoVideo.title}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              )
             ) : (
               <div className="text-center space-y-3 p-4">
                 <button
@@ -936,6 +981,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </section>
+      }
 
       {/* 7. CUSTOMER TESTIMONIALS */}
       <section className="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">

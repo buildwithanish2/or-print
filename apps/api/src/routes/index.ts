@@ -88,12 +88,13 @@ router.get('/testimonials/public', async (req, res) => {
   }
 });
 
-router.get('/demo-video/public', async (req, res) => {
+router.get('/demo-video/public', async (req, res, next) => {
   try {
     const video = await prisma.demoVideo.findFirst({ where: { isActive: true }, orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }] });
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ success: true, data: video });
-  } catch {
-    res.status(200).json({ success: true, data: null });
+  } catch (error) {
+    next(error);
   }
 });
 

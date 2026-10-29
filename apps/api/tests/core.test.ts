@@ -1116,15 +1116,17 @@ test('demo-video admin read returns the latest saved row without creating defaul
   const saved = { id: 'older-random-id', title: 'Current title', videoUrl: 'https://www.youtube-nocookie.com/embed/current', isActive: false };
   let query: any;
   let created = false;
+  let cacheControl = '';
   try {
     db.demoVideo.findFirst = async (args: any) => { query = args; return saved; };
     db.demoVideo.create = async () => { created = true; throw new Error('read must not create'); };
     let body: any;
-    const res: any = { status() { return this; }, json(value: any) { body = value; return this; } };
+    const res: any = { setHeader(name: string, value: string) { if (name === 'Cache-Control') cacheControl = value; return this; }, status() { return this; }, json(value: any) { body = value; return this; } };
     await AdminController.getDemoVideo({} as any, res, (error: unknown) => { throw error; });
     assert.deepEqual(query.orderBy, [{ updatedAt: 'desc' }, { createdAt: 'desc' }]);
     assert.equal(body.data.id, saved.id);
     assert.equal(body.data.isActive, false);
+    assert.equal(cacheControl, 'no-store');
     assert.equal(created, false);
   } finally {
     db.demoVideo.findFirst = originalFind;
@@ -1175,5 +1177,46 @@ test('demo-video save rejects non-HTTPS URLs without writing settings', async ()
     assert.equal(wrote, false);
   } finally {
     db.$transaction = originalTransaction;
+  }
+});
+
+test('demo-video save normalizes regular YouTube watch and short links to playable embeds', async () => {
+  const db = prisma as any;
+  const originals = { transaction: db.$transaction, findFirst: db.demoVideo.findFirst, update: db.demoVideo.update, updateMany: db.demoVideo.updateMany };
+  let savedUrl = '';
+  try {
+    db.$transaction = async (callback: (tx: any) => Promise<any>) => callback(db);
+    db.demoVideo.findFirst = async () => ({ id: 'video-1' });
+    db.demoVideo.updateMany = async () => ({ count: 0 });
+    db.demoVideo.update = async (args: any) => { savedUrl = args.data.videoUrl; return { id: 'video-1', ...args.data }; };
+    const res: any = { status() { return this; }, json(value: any) { this.body = value; return this; } };
+    await AdminController.saveDemoVideo({ body: { title: 'New clip', videoUrl: 'https://www.youtube.com/watch?v=AbCd_123-xy', provider: 'YOUTUBE', isActive: true } } as any, res, (error: unknown) => { throw error; });
+    assert.equal(res.body.success, true);
+    assert.equal(savedUrl, 'https://www.youtube-nocookie.com/embed/AbCd_123-xy');
+  } finally {
+    db.$transaction = originals.transaction;
+    db.demoVideo.findFirst = originals.findFirst;
+    db.demoVideo.update = originals.update;
+    db.demoVideo.updateMany = originals.updateMany;
+  }
+});
+
+test('testimonial creation respects the admin moderation choice', async () => {
+  const db = prisma as any;
+  const originalCreate = db.testimonial.create;
+  let createArgs: any;
+  try {
+    db.testimonial.create = async (args: any) => { createArgs = args; return { id: 'testimonial-1', ...args.data }; };
+    let body: any;
+    const res: any = { status() { return this; }, json(value: any) { body = value; return this; } };
+    await AdminController.saveTestimonial({ body: {
+      name: 'Test Author', role: 'Owner', shopName: 'Test Shop', city: 'Pune', review: 'Good service',
+      rating: 5, isApproved: false, isFeatured: false, displayOrder: 2,
+    } } as any, res, (error: unknown) => { throw error; });
+    assert.equal(body.success, true);
+    assert.equal(createArgs.data.isApproved, false);
+    assert.equal(createArgs.data.isFeatured, false);
+  } finally {
+    db.testimonial.create = originalCreate;
   }
 });

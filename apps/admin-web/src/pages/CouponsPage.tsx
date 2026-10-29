@@ -86,6 +86,7 @@ export const CouponsPage: React.FC = () => {
                   <th className="pb-3">Value</th>
                   <th className="pb-3">Min Order</th>
                   <th className="pb-3">Max Cap</th>
+                  <th className="pb-3">Expiry / Usage</th>
                   <th className="pb-3">Status</th>
                 </tr>
               </thead>
@@ -99,9 +100,13 @@ export const CouponsPage: React.FC = () => {
                     </td>
                     <td className="py-3.5 text-slate-400">₹{c.minOrderAmount}</td>
                     <td className="py-3.5 text-slate-400">{c.maxDiscount ? `₹${c.maxDiscount}` : 'None'}</td>
+                    <td className="py-3.5 text-slate-400">
+                      {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : 'No expiry'}
+                      {c.usageLimit ? ` · ${c.usedCount || 0}/${c.usageLimit} used` : ' · Unlimited'}
+                    </td>
                     <td className="py-3.5">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        Active
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${!c.isActive || (c.expiresAt && new Date(c.expiresAt).getTime() <= Date.now()) || (c.usageLimit && (c.usedCount || 0) >= c.usageLimit) ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
+                        {!c.isActive ? 'Disabled' : c.expiresAt && new Date(c.expiresAt).getTime() <= Date.now() ? 'Expired' : c.usageLimit && (c.usedCount || 0) >= c.usageLimit ? 'Limit reached' : 'Active'}
                       </span>
                     </td>
                   </tr>

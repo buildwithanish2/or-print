@@ -182,13 +182,17 @@ export const DemoVideoManagement: React.FC = () => {
 
           <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
             {videoUrl ? (
-              <iframe
-                src={videoUrl}
-                title={title || 'Demo Video'}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              ></iframe>
+              provider === 'DIRECT' ? (
+                <video src={videoUrl} title={title || 'Demo Video'} className="w-full h-full" controls playsInline />
+              ) : (
+                <iframe
+                  src={videoUrl}
+                  title={title || 'Demo Video'}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              )
             ) : (
               <div className="text-slate-500 text-xs">Enter a valid video URL above to preview</div>
             )}

@@ -562,7 +562,9 @@ export class AdminController {
             city,
             review,
             rating: Number(rating || 5),
-            isApproved: true,
+            // Preserve the admin's explicit moderation choice. Older clients
+            // that omit the field retain the previous approved-by-default behavior.
+            isApproved: typeof isApproved === 'boolean' ? isApproved : true,
             isFeatured: Boolean(isFeatured),
             displayOrder: Number(displayOrder || 0),
           },
@@ -593,6 +595,7 @@ export class AdminController {
       // Do not create a new active default when an existing record is disabled.
       // That made old video records reappear and caused saved edits to look lost.
       const video = await prisma.demoVideo.findFirst({ orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }] });
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(200).json({ success: true, data: video });
     } catch (err) {
       next(err);
@@ -611,7 +614,25 @@ export class AdminController {
       let parsedVideoUrl: URL;
       try { parsedVideoUrl = new URL(videoUrl); }
       catch { return res.status(400).json({ success: false, message: 'Enter a valid video URL.' }); }
-      if (parsedVideoUrl.protocol !== 'https:' || !['www.youtube-nocookie.com', 'www.youtube.com', 'youtube.com', 'player.vimeo.com'].includes(parsedVideoUrl.hostname) && !(provider === 'DIRECT' && /\.mp4$/i.test(parsedVideoUrl.pathname))) {
+      if (parsedVideoUrl.protocol !== 'https:') {
+        return res.status(400).json({ success: false, message: 'Use a secure YouTube/Vimeo embed URL or an HTTPS MP4 URL.' });
+      }
+      const youtubeHosts = ['www.youtube-nocookie.com', 'www.youtube.com', 'youtube.com', 'youtu.be', 'www.youtu.be'];
+      if (youtubeHosts.includes(parsedVideoUrl.hostname)) {
+        const videoId = parsedVideoUrl.hostname.includes('youtu.be')
+          ? parsedVideoUrl.pathname.split('/').filter(Boolean)[0]
+          : parsedVideoUrl.pathname === '/watch'
+            ? parsedVideoUrl.searchParams.get('v')
+            : parsedVideoUrl.pathname.match(/^\/(?:embed|shorts)\/([^/]+)/)?.[1];
+        if (!videoId || !/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+          return res.status(400).json({ success: false, message: 'Use a valid YouTube video or embed URL.' });
+        }
+        parsedVideoUrl = new URL(`https://www.youtube-nocookie.com/embed/${videoId}`);
+      } else if (parsedVideoUrl.hostname === 'player.vimeo.com') {
+        if (!/^\/video\/\d+$/.test(parsedVideoUrl.pathname)) {
+          return res.status(400).json({ success: false, message: 'Use a valid Vimeo player URL.' });
+        }
+      } else if (!(provider === 'DIRECT' && /\.mp4$/i.test(parsedVideoUrl.pathname))) {
         return res.status(400).json({ success: false, message: 'Use a secure YouTube/Vimeo embed URL or an HTTPS MP4 URL.' });
       }
       if (typeof isActive !== 'boolean') {
