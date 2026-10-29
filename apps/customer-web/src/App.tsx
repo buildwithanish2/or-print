@@ -5,6 +5,7 @@ import { CustomerLandingPage } from './pages/CustomerLandingPage';
 import { OrderTrackingPage } from './pages/OrderTrackingPage';
 import { LegalPageView } from './pages/LegalPageView';
 import { AuthActionPage } from './pages/AuthActionPage';
+import { getShopSlugFromPath } from './lib/shop-route.js';
 
 export const App: React.FC = () => {
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);
@@ -33,14 +34,14 @@ export const App: React.FC = () => {
       <OrderTrackingPage
         orderNumber={orderNumber}
         trackingToken={trackingToken}
-        onBackToPrint={() => navigate('/print/abc-digital-print')}
+        onBackToPrint={(shopSlug) => navigate(shopSlug ? `/print/${encodeURIComponent(shopSlug)}` : '/')}
       />
     );
   }
 
   // Route 2: Customer Print Screen (/print/:shopSlug)
   if (currentPath.startsWith('/print/')) {
-    const shopSlug = currentPath.split('/print/')[1]?.split('/')[0] || 'abc-digital-print';
+    const shopSlug = getShopSlugFromPath(currentPath) || '';
     return (
       <CustomerLandingPage
         shopSlug={shopSlug}
@@ -80,7 +81,6 @@ export const App: React.FC = () => {
   return (
     <HomePage
       onNavigateToShopRegister={() => navigate('/shop/register')}
-      onNavigateToPrintDemo={() => navigate('/print/abc-digital-print')}
       onNavigateToLegal={(slug) => navigate(`/${slug}`)}
     />
   );

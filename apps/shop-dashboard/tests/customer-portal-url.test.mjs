@@ -13,8 +13,8 @@ test('opens the configured shop slug on the production customer portal', () => {
 
 test('uses a different authenticated shop slug without hardcoding a shop', () => {
   assert.equal(
-    buildCustomerPrintUrl(customerBaseUrl, 'abc-digital-print', true),
-    'https://customer-web-six-livid.vercel.app/print/abc-digital-print',
+    buildCustomerPrintUrl(customerBaseUrl, 'northside-print', true),
+    'https://customer-web-six-livid.vercel.app/print/northside-print',
   );
 });
 

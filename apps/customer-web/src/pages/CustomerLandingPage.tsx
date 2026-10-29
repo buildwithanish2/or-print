@@ -59,6 +59,12 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
   useEffect(() => {
     let alive = true;
     setLoadingShop(true);
+    if (!shopSlug.trim()) {
+      setShop(null);
+      setShopError('This shop link is missing a valid shop slug. Please scan the QR code provided by the shop.');
+      setLoadingShop(false);
+      return () => { alive = false; };
+    }
     Promise.all([api.get(`/shops/public/${encodeURIComponent(shopSlug)}`), api.get(`/payments/methods/${encodeURIComponent(shopSlug)}`).catch(() => null)])
       .then(([shopRes, methodsRes]) => {
         if (!alive) return;

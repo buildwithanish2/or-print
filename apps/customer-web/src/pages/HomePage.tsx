@@ -189,13 +189,11 @@ const FAQ_ITEMS = [
 
 interface HomePageProps {
   onNavigateToShopRegister: () => void;
-  onNavigateToPrintDemo: () => void;
   onNavigateToLegal?: (slug: string) => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
   onNavigateToShopRegister,
-  onNavigateToPrintDemo,
   onNavigateToLegal,
 }) => {
   const [plans, setPlans] = useState<any[]>(DEFAULT_SAAS_PLANS);

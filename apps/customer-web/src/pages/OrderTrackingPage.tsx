@@ -27,7 +27,7 @@ import confetti from 'canvas-confetti';
 interface OrderTrackingPageProps {
   orderNumber: string;
   trackingToken: string;
-  onBackToPrint: () => void;
+  onBackToPrint: (shopSlug?: string) => void;
 }
 
 const paymentIsSettled = (status?: string) => ['PAID', 'PAYMENT_VERIFIED', 'NOT_REQUIRED'].includes(status || '');
@@ -360,7 +360,7 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
         <p className="text-xs text-slate-400 max-w-xs">{error || 'Could not locate order details.'}</p>
         <button
           type="button"
-          onClick={onBackToPrint}
+          onClick={() => onBackToPrint(order?.shop?.slug)}
           className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs"
         >
           Back to Store
@@ -379,7 +379,7 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
         <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={onBackToPrint}
+            onClick={() => onBackToPrint(order.shop?.slug)}
             className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
