@@ -38,6 +38,8 @@ CUSTOMER_PORTAL_URL="https://customer-web-six-livid.vercel.app"
 PUBLIC_API_URL="https://api.anishnova.com"
 ```
 
+For Hostinger Email, Hostinger currently documents `smtp.hostinger.com` on port `465` with SSL/TLS (`SMTP_SECURE=true`), or port `587` with TLS/STARTTLS (`SMTP_SECURE=false`). Use the exact outgoing-server details shown for the mailbox in Hostinger hPanel, and use the full mailbox address as `SMTP_USER` unless hPanel says otherwise. The mailbox password must be rotated and entered only in the EC2 private environment. [Hostinger SMTP configuration](https://www.hostinger.com/support/1575756-how-to-get-email-account-configuration-details-for-hostinger-email/)
+
 The example host and credential are placeholders, not a working SMTP account.
 
 ## Docker Compose
@@ -59,6 +61,66 @@ docker compose logs --tail=100 api
 ```
 
 Review logs for application errors, but do not enable shell tracing or dump the resolved Compose configuration because it contains secrets. This change does not require deleting or recreating database volumes.
+
+### Verify and send a controlled test message
+
+After the rotated Hostinger password has been entered in the EC2-side environment and the API container has been recreated, run this from the directory containing `docker-compose.yml`. It checks that the required settings exist, verifies SMTP TLS/authentication, and sends a plain test message to the controlled mailbox. It prints missing variable names or a generic SMTP error only; it never prints environment values, message credentials, or the full SMTP error object.
+
+```sh
+docker compose exec -T api node <<'NODE'
+const nodemailer = require('nodemailer');
+const required = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM_EMAIL'];
+const missing = required.filter((key) => !process.env[key]);
+if (missing.length) {
+  console.error(`SMTP configuration is incomplete: ${missing.join(', ')}`);
+  process.exit(1);
+}
+const port = Number(process.env.SMTP_PORT || 587);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error('SMTP_PORT is invalid');
+  process.exit(1);
+}
+const secure = process.env.SMTP_SECURE
+  ? process.env.SMTP_SECURE.toLowerCase() === 'true'
+  : port === 465;
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port,
+  secure,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  requireTLS: !secure,
+  tls: { minVersion: 'TLSv1.2' },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 20000,
+});
+const from = {
+  name: process.env.SMTP_FROM_NAME || 'AnishNova Print',
+  address: process.env.SMTP_FROM_EMAIL,
+};
+(async () => {
+  try {
+    await transporter.verify();
+    console.log('SMTP connection and authentication verified.');
+    const result = await transporter.sendMail({
+      from,
+      to: 'noreply@anishnova.com',
+      subject: 'AnishNova Print SMTP delivery test',
+      text: 'This is a controlled SMTP delivery test. No account or payment action was performed.',
+    });
+    if (!result.accepted || result.accepted.length === 0) throw new Error('recipient_not_accepted');
+    console.log('SMTP server accepted the controlled test message. Check the recipient inbox and spam folder.');
+    await transporter.close();
+  } catch (error) {
+    console.error(`SMTP test failed (${error && error.code ? error.code : 'connection_or_delivery_error'}).`);
+    await transporter.close();
+    process.exitCode = 1;
+  }
+})();
+NODE
+```
+
+An accepted SMTP send confirms provider acceptance, not inbox placement. Confirm receipt at `noreply@anishnova.com` and check spam/quarantine before declaring end-to-end delivery successful. Do not run this test until the rotated password is installed on EC2. If the controlled recipient should change, edit only the `to` address before running; never place an SMTP password in the command.
 
 ## Behavior and security
 
