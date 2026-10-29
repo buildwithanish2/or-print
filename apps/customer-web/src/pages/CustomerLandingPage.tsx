@@ -61,8 +61,14 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
     Promise.all([api.get(`/shops/public/${encodeURIComponent(shopSlug)}`), api.get(`/payments/methods/${encodeURIComponent(shopSlug)}`).catch(() => null)])
       .then(([shopRes, methodsRes]) => {
         if (!alive) return;
-        if (!shopRes.data.success) throw new Error('This print shop could not be loaded.');
-        setShop(shopRes.data.data as CustomerShop);
+        const shopData = shopRes?.data?.data;
+        if (shopRes?.data?.success !== true
+          || !shopData
+          || typeof shopData.slug !== 'string'
+          || shopData.slug.toLowerCase() !== shopSlug.toLowerCase()) {
+          throw new Error(shopRes?.data?.message || 'The shop response was invalid. Please scan the shop QR code again.');
+        }
+        setShop(shopData as CustomerShop);
         setMethods((methodsRes?.data.data?.methods || []).filter((m: CustomerPaymentMethod) => m.enabled));
         setShopError(null);
       })

@@ -201,10 +201,24 @@ export const getApiBaseUrl = (): string => {
 };
 
 export const getCustomerWebUrl = (): string => {
-  if (typeof process !== 'undefined' && process.env?.CUSTOMER_PORTAL_URL) {
-    return process.env.CUSTOMER_PORTAL_URL.replace(/\/$/, '');
+  const isProduction = typeof process !== 'undefined' && process.env?.NODE_ENV === 'production';
+  const configuredUrl = typeof process !== 'undefined' ? process.env?.CUSTOMER_PORTAL_URL : undefined;
+  if (configuredUrl) {
+    if (!isProduction) return configuredUrl.replace(/\/$/, '');
+    try {
+      const parsed = new URL(configuredUrl);
+      const isLocalHost = parsed.hostname === 'localhost'
+        || parsed.hostname.endsWith('.localhost')
+        || parsed.hostname === '127.0.0.1'
+        || parsed.hostname === '[::1]';
+      if (parsed.protocol === 'https:' && !isLocalHost && !parsed.username && !parsed.password) {
+        return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
+      }
+    } catch {
+      // Invalid production portal configuration uses the known deployed portal.
+    }
   }
-  return 'http://localhost:5173';
+  return isProduction ? 'https://customer-web-six-livid.vercel.app' : 'http://localhost:5173';
 };
 
 export const getShopWebUrl = (): string => {

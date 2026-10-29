@@ -17,6 +17,26 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
+import { getCustomerWebUrl } from '@printqr/config';
+
+test('customer portal URL uses production domain when missing or set to localhost in production', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalCustomerPortalUrl = process.env.CUSTOMER_PORTAL_URL;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.CUSTOMER_PORTAL_URL;
+    assert.equal(getCustomerWebUrl(), 'https://customer-web-six-livid.vercel.app');
+    process.env.CUSTOMER_PORTAL_URL = 'http://localhost:5173';
+    assert.equal(getCustomerWebUrl(), 'https://customer-web-six-livid.vercel.app');
+    process.env.CUSTOMER_PORTAL_URL = 'https://customer.example.test/';
+    assert.equal(getCustomerWebUrl(), 'https://customer.example.test');
+  } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+    if (originalCustomerPortalUrl === undefined) delete process.env.CUSTOMER_PORTAL_URL;
+    else process.env.CUSTOMER_PORTAL_URL = originalCustomerPortalUrl;
+  }
+});
 
 test('internal server errors do not expose Prisma/database details to clients', () => {
   let status = 0;

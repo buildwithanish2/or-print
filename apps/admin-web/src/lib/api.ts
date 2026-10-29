@@ -2,7 +2,24 @@ import axios from 'axios';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 export const API_ROOT_URL = API_BASE_URL.replace(/\/$/, '');
-export const CUSTOMER_PORTAL_URL = import.meta.env.VITE_CUSTOMER_URL || 'http://localhost:5173';
+const PRODUCTION_CUSTOMER_PORTAL_URL = 'https://customer-web-six-livid.vercel.app';
+const configuredCustomerPortalUrl = import.meta.env.VITE_CUSTOMER_URL;
+export const CUSTOMER_PORTAL_URL = import.meta.env.PROD
+  ? (() => {
+    try {
+      const url = new URL(configuredCustomerPortalUrl);
+      const isLocalHost = url.hostname === 'localhost'
+        || url.hostname.endsWith('.localhost')
+        || url.hostname === '127.0.0.1'
+        || url.hostname === '[::1]';
+      return url.protocol === 'https:' && !isLocalHost && !url.username && !url.password
+        ? `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+        : PRODUCTION_CUSTOMER_PORTAL_URL;
+    } catch {
+      return PRODUCTION_CUSTOMER_PORTAL_URL;
+    }
+  })()
+  : configuredCustomerPortalUrl || 'http://localhost:5173';
 export const SHOP_PORTAL_URL = import.meta.env.VITE_SHOP_URL || 'http://localhost:5174';
 
 export const api = axios.create({
