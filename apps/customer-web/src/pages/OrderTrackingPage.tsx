@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { ApiRequestError, api } from '../lib/api';
 import { getSocket } from '../lib/socket';
+import { startStatusPolling } from '../lib/status-polling.js';
 import { OrderDTO, PrintJobDTO } from '@printqr/types';
 import {
   CheckCircle2,
@@ -52,13 +53,14 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
   const [timeLeft, setTimeLeft] = useState(600); // 10 minutes session
 
   // Polling ref to prevent concurrent or infinite polling
-  const pollingTimeouts = useRef<NodeJS.Timeout[]>([]);
+  const pollingStopRef = useRef<(() => void) | null>(null);
   const isPollingActive = useRef(false);
 
   const clearAllTimeouts = () => {
-    pollingTimeouts.current.forEach((t) => clearTimeout(t));
-    pollingTimeouts.current = [];
+    const stop = pollingStopRef.current;
+    pollingStopRef.current = null;
     isPollingActive.current = false;
+    stop?.();
   };
 
   const fetchOrder = useCallback(async () => {
@@ -94,7 +96,9 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
         setPaymentData(res.data.data);
       }
     } catch (err) {
-      console.error('Failed to initialize UPI payment session:', err);
+      console.warn('[upi-session] initialization failed', {
+        status: err instanceof ApiRequestError ? err.status : undefined,
+      });
     } finally {
       setLoadingPayment(false);
     }
@@ -168,38 +172,34 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
           setPaymentPhase('SUCCESS');
           clearAllTimeouts();
           confetti({ particleCount: 90, spread: 75, origin: { y: 0.6 } });
-          fetchOrder();
+          await fetchOrder();
           return true;
         }
       }
     } catch (err) {
-      console.error('Status check error:', err);
+      console.warn('[payment-status] check failed', {
+        status: err instanceof ApiRequestError ? err.status : undefined,
+        orderReferencePresent: Boolean(orderNumber),
+        trackingTokenPresent: Boolean(trackingToken),
+      });
     }
     return false;
-  }, [orderNumber, fetchOrder]);
+  }, [orderNumber, trackingToken, fetchOrder]);
 
   // Safe backoff polling (immediately, +2s, +4s, +6s, +8s, +12s, +16s, +20s up to 2 mins)
   const startSafeStatusPolling = useCallback(() => {
     if (isPollingActive.current) return;
-    isPollingActive.current = true;
     clearAllTimeouts();
-
+    isPollingActive.current = true;
     setPaymentPhase('VERIFYING');
-
-    const scheduleCheck = (delayMs: number, nextDelays: number[]) => {
-      const timeout = setTimeout(async () => {
-        const verified = await checkPaymentStatus();
-        if (!verified && nextDelays.length > 0 && isPollingActive.current) {
-          scheduleCheck(nextDelays[0], nextDelays.slice(1));
-        } else if (!verified && nextDelays.length === 0) {
-          isPollingActive.current = false;
-        }
-      }, delayMs);
-      pollingTimeouts.current.push(timeout);
-    };
-
-    // Immediate check, then spaced backoff intervals
-    scheduleCheck(300, [2000, 4000, 6000, 8000, 12000, 16000, 20000, 25000]);
+    pollingStopRef.current = startStatusPolling(
+      checkPaymentStatus,
+      [2000, 4000, 6000, 8000, 12000, 16000, 20000, 25000],
+      {
+        onStop: () => { isPollingActive.current = false; pollingStopRef.current = null; },
+        onExhausted: () => setPaymentPhase((current) => current === 'SUCCESS' ? current : 'IDLE'),
+      },
+    );
   }, [checkPaymentStatus]);
 
   // Initial Load & Socket Setup
@@ -256,33 +256,34 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
     };
   }, [orderNumber, fetchOrder]);
 
-  // Listen for window refocus / app return
+  // Refresh the authoritative order state and resume bounded polling when the
+  // customer returns from their UPI app. Focus/visibility never confirms payment.
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !paymentIsSettled(order?.paymentStatus)) {
+    let lastResumeRefreshAt = 0;
+    const resumeAfterAppReturn = () => {
+      if (document.visibilityState !== 'visible' || paymentIsSettled(order?.paymentStatus)) return;
+      const now = Date.now();
+      if (now - lastResumeRefreshAt > 1000) {
+        lastResumeRefreshAt = now;
+        clearAllTimeouts();
         startSafeStatusPolling();
+        void fetchOrder();
       }
     };
 
-    const handleFocus = () => {
-      if (!paymentIsSettled(order?.paymentStatus)) {
-        startSafeStatusPolling();
-      }
-    };
-
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', resumeAfterAppReturn);
+    window.addEventListener('focus', resumeAfterAppReturn);
 
     return () => {
-      window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', resumeAfterAppReturn);
+      window.removeEventListener('focus', resumeAfterAppReturn);
     };
-  }, [order?.paymentStatus, startSafeStatusPolling]);
+  }, [order?.paymentStatus, fetchOrder, startSafeStatusPolling]);
 
-  // Load payment details only for manual UPI. Cash remains uncollected until
-  // a shop operator confirms it; Razorpay opens only after the customer action.
+  // Load a UPI session only while awaiting transfer. A restored PAYMENT_SUBMITTED
+  // order must not request another session after the customer returns or refreshes.
   useEffect(() => {
-    if (order?.paymentMethod === 'UPI' && !paymentIsSettled(order.paymentStatus)) {
+    if (order?.paymentMethod === 'UPI' && order.paymentStatus === 'PENDING') {
       initUpiPayment();
     }
   }, [order?.paymentMethod, order?.paymentStatus]);
@@ -326,7 +327,7 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
         startSafeStatusPolling();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || err.message || 'Failed to submit UTR');
+      setError(err.message || 'Could not submit the payment reference. Please try again.');
     } finally {
       setSubmittingUtr(false);
     }
@@ -377,6 +378,7 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
 
   const isFreeOrder = order.paymentMethod === 'COLLEGE_FREE' && order.paymentStatus === 'NOT_REQUIRED';
   const isPaid = order.paymentStatus === 'PAID' || order.paymentStatus === 'PAYMENT_VERIFIED' || isFreeOrder || paymentPhase === 'SUCCESS';
+  const hasSubmittedUtr = utrSubmitted || order.paymentStatus === 'PAYMENT_SUBMITTED';
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 md:p-8 flex flex-col items-center justify-start">
@@ -464,6 +466,11 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
               </p>
             </div>
 
+            {hasSubmittedUtr ? (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100" role="status">
+                Your payment reference is awaiting shop review. Do not pay again; this direct UPI payment is not verified automatically.
+              </div>
+            ) : <>
             {/* Dynamic UPI QR Code */}
             <div className="p-4 bg-white rounded-3xl inline-block mx-auto shadow-2xl ring-8 ring-purple-500/10">
               {loadingPayment ? (
@@ -508,6 +515,7 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
                 </a>
               </div>
             )}
+            </>}
 
             {/* Quick Copy UPI ID and Order ID */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-left">
@@ -565,10 +573,12 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
                   )}
                   <span className="text-slate-300">
                     {paymentPhase === 'OPENED_UPI'
-                      ? 'Waiting for payment confirmation from UPI app...'
+                      ? 'UPI app opened. PrintQ will wait for shop-side payment confirmation.'
                       : paymentPhase === 'VERIFYING'
-                      ? 'Verifying payment with shop counter...'
-                      : 'Waiting for payment scan...'}
+                      ? 'Checking the latest payment status with the shop...'
+                      : hasSubmittedUtr
+                      ? 'Payment reference received. Waiting for shop confirmation.'
+                      : 'Payment is pending. After paying, submit your UPI reference for shop review.'}
                   </span>
                 </div>
 
@@ -589,13 +599,13 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
                   onClick={() => setShowManualUtr(!showManualUtr)}
                   className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center space-x-1 mx-auto"
                 >
-                  <span>Having trouble verifying automatically?</span>
+                  <span>{hasSubmittedUtr ? 'Payment reference status' : 'Paid using UPI? Submit reference for shop review'}</span>
                   {showManualUtr ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
 
                 {showManualUtr && (
                   <div className="mt-3 p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                    {utrSubmitted ? (
+                    {hasSubmittedUtr ? (
                       <div className="text-xs text-emerald-400 flex items-center space-x-2">
                         <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                         <span>Reference submitted for manual shop verification. Printing starts after the shop confirms receipt.</span>
@@ -682,20 +692,20 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({ orderNumbe
                 className={`w-7 h-7 rounded-full flex items-center justify-center font-bold ${
                   isPaid
                     ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
-                    : utrSubmitted || paymentPhase === 'VERIFYING'
+                    : hasSubmittedUtr || paymentPhase === 'VERIFYING'
                     ? 'bg-amber-500/20 border border-amber-500 text-amber-400 animate-pulse'
                     : 'bg-slate-800 text-slate-500'
                 }`}
               >
-                {isPaid ? '✓' : utrSubmitted ? '●' : '2'}
+                {isPaid ? '✓' : hasSubmittedUtr ? '●' : '2'}
               </div>
               <div className="flex-1">
                 <div className="font-bold text-white">Direct Store UPI Payment Verification</div>
                 <div className="text-slate-500 text-[11px]">
                   {isPaid
                     ? 'Payment Verified & Confirmed'
-                    : utrSubmitted
-                    ? 'Verifying reference with shop counter...'
+                    : hasSubmittedUtr
+                    ? 'Payment reference received. Waiting for shop confirmation.'
                     : 'Awaiting payment transfer'}
                 </div>
               </div>

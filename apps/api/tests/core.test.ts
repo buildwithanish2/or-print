@@ -8,6 +8,7 @@ import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment,
 import { canReserveFreePrintAllowance, canShopOwnerReviewGuestId, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../src/services/free-print.service';
 import { AuthController } from '../src/controllers/auth.controller';
 import { OrderController } from '../src/controllers/order.controller';
+import { PaymentController } from '../src/controllers/payment.controller';
 import { ShopController } from '../src/controllers/shop.controller';
 import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
@@ -195,6 +196,7 @@ test('manual UPI checkout persists a pending order that tracks with returned ide
     assert.equal(stored.totalAmount, 11);
     assert.ok(stored.orderNumber);
     assert.ok(stored.trackingToken);
+    assert.equal(createResponse.body.data.trackingUrl, `/track/${encodeURIComponent(stored.orderNumber)}?token=${encodeURIComponent(stored.trackingToken)}`);
 
     const trackResponse = makeResponse();
     let trackError: unknown;
@@ -213,6 +215,51 @@ test('manual UPI checkout persists a pending order that tracks with returned ide
     PricingEngineService.calculateOrderTotal = originals.orderTotal;
     PaymentGatewayService.initializeOrderPayment = originals.paymentInit;
   }
+});
+
+test('manual UPI status remains pending after customer proof and becomes verified only after shop approval', async () => {
+  const db = prisma as any;
+  const originalFindUnique = db.order.findUnique;
+  const order: any = {
+    orderNumber: 'ANP-TESTUPI', trackingToken: 'tracking-token-for-test', totalAmount: 11.44,
+    paymentMethod: 'UPI', paymentStatus: 'PAYMENT_SUBMITTED', printStatus: 'RECEIVED',
+    updatedAt: new Date(), shop: { name: 'Test Shop', logoUrl: null },
+    payments: [{ id: 'payment-test', amount: 11.44, transactionRef: 'UTR-TEST-1234' }],
+  };
+  const getStatus = async () => {
+    const response: any = { statusCode: 200, body: undefined, status(code: number) { this.statusCode = code; return this; }, json(body: any) { this.body = body; return this; } };
+    let error: unknown;
+    await PaymentController.getPaymentStatus({ params: { orderNumber: order.orderNumber }, query: { token: order.trackingToken } } as any, response, (caught: unknown) => { error = caught; });
+    assert.equal(error, undefined);
+    return response;
+  };
+
+  try {
+    db.order.findUnique = async () => order;
+    const pending = await getStatus();
+    assert.equal(pending.statusCode, 200);
+    assert.equal(pending.body.data.paymentStatus, 'PAYMENT_SUBMITTED');
+    assert.equal(pending.body.data.isVerified, false);
+
+    order.paymentStatus = 'PAID';
+    order.printStatus = 'QUEUED';
+    order.payments[0].status = 'PAID';
+    const verified = await getStatus();
+    assert.equal(verified.statusCode, 200);
+    assert.equal(verified.body.data.paymentStatus, 'PAID');
+    assert.equal(verified.body.data.isVerified, true);
+  } finally {
+    db.order.findUnique = originalFindUnique;
+  }
+});
+
+test('manual UPI proof rejects an invalid short payment reference', async () => {
+  const response: any = { statusCode: 200, body: undefined, status(code: number) { this.statusCode = code; return this; }, json(body: any) { this.body = body; return this; } };
+  let error: unknown;
+  await PaymentController.submitUpiProof({ body: { orderNumber: 'ANP-TESTUPI', trackingToken: 'not-logged', utrReference: 'x' } } as any, response, (caught: unknown) => { error = caught; });
+  assert.equal(error, undefined);
+  assert.equal(response.statusCode, 400);
+  assert.match(response.body.message, /valid UPI UTR/i);
 });
 
 test('internal server errors do not expose Prisma/database details to clients', () => {
