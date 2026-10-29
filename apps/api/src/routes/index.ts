@@ -90,7 +90,7 @@ router.get('/testimonials/public', async (req, res) => {
 
 router.get('/demo-video/public', async (req, res) => {
   try {
-    const video = await prisma.demoVideo.findFirst({ where: { isActive: true } });
+    const video = await prisma.demoVideo.findFirst({ where: { isActive: true }, orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }] });
     res.status(200).json({ success: true, data: video });
   } catch {
     res.status(200).json({ success: true, data: null });

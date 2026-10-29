@@ -590,18 +590,9 @@ export class AdminController {
    */
   static async getDemoVideo(req: Request, res: Response, next: NextFunction) {
     try {
-      let video = await prisma.demoVideo.findFirst({ where: { isActive: true } });
-      if (!video) {
-        video = await prisma.demoVideo.create({
-          data: {
-            title: 'AnishNova Print Demo Walkthrough',
-            description: 'Instant mobile document printing directly to Windows printers.',
-            videoUrl: 'https://www.youtube-nocookie.com/embed/qOPE-90Um8g',
-            provider: 'YOUTUBE',
-            isActive: true,
-          },
-        });
-      }
+      // Do not create a new active default when an existing record is disabled.
+      // That made old video records reappear and caused saved edits to look lost.
+      const video = await prisma.demoVideo.findFirst({ orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }] });
       return res.status(200).json({ success: true, data: video });
     } catch (err) {
       next(err);
@@ -611,23 +602,38 @@ export class AdminController {
   static async saveDemoVideo(req: Request, res: Response, next: NextFunction) {
     try {
       const { title, description, videoUrl, provider, isActive } = req.body;
-      const video = await prisma.demoVideo.upsert({
-        where: { id: 'demo-video-default' },
-        update: {
-          title,
-          description,
-          videoUrl,
-          provider: provider || 'YOUTUBE',
-          isActive: typeof isActive === 'boolean' ? isActive : true,
-        },
-        create: {
-          id: 'demo-video-default',
-          title,
-          description,
-          videoUrl,
-          provider: provider || 'YOUTUBE',
-          isActive: true,
-        },
+      if (typeof title !== 'string' || !title.trim() || title.length > 160) {
+        return res.status(400).json({ success: false, message: 'Enter a video title up to 160 characters.' });
+      }
+      if (typeof videoUrl !== 'string' || videoUrl.length > 2048) {
+        return res.status(400).json({ success: false, message: 'Enter a valid video URL.' });
+      }
+      let parsedVideoUrl: URL;
+      try { parsedVideoUrl = new URL(videoUrl); }
+      catch { return res.status(400).json({ success: false, message: 'Enter a valid video URL.' }); }
+      if (parsedVideoUrl.protocol !== 'https:' || !['www.youtube-nocookie.com', 'www.youtube.com', 'youtube.com', 'player.vimeo.com'].includes(parsedVideoUrl.hostname) && !(provider === 'DIRECT' && /\.mp4$/i.test(parsedVideoUrl.pathname))) {
+        return res.status(400).json({ success: false, message: 'Use a secure YouTube/Vimeo embed URL or an HTTPS MP4 URL.' });
+      }
+      if (typeof isActive !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'Video visibility must be enabled or disabled.' });
+      }
+
+      const video = await prisma.$transaction(async (tx) => {
+        const current = await tx.demoVideo.findFirst({ orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }] });
+        const data = {
+          title: title.trim(),
+          description: typeof description === 'string' ? description.slice(0, 2000) : null,
+          videoUrl: parsedVideoUrl.toString(),
+          provider: provider === 'VIMEO' || provider === 'DIRECT' ? provider : 'YOUTUBE',
+          isActive,
+        };
+        // Deactivate legacy duplicate active rows first. Prisma updates their
+        // updatedAt values, so write the canonical row last to keep GET stable.
+        await tx.demoVideo.updateMany({ where: { id: { not: current?.id || 'demo-video-default' }, isActive: true }, data: { isActive: false } });
+        const saved = current
+          ? await tx.demoVideo.update({ where: { id: current.id }, data })
+          : await tx.demoVideo.create({ data: { id: 'demo-video-default', ...data } });
+        return saved;
       });
 
       return res.status(200).json({ success: true, message: 'Demo video updated', data: video });

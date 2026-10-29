@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment, decryptPaymentCredentialWithKey, encryptPaymentCredentialWithKey, isValidUpiVpa, PaymentGatewayService, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../src/services/payment.service';
 import { canReserveFreePrintAllowance, canShopOwnerReviewGuestId, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../src/services/free-print.service';
 import { AuthController } from '../src/controllers/auth.controller';
+import { AdminController } from '../src/controllers/admin.controller';
 import { OrderController } from '../src/controllers/order.controller';
 import { PaymentController } from '../src/controllers/payment.controller';
 import { ShopController } from '../src/controllers/shop.controller';
@@ -1105,5 +1106,74 @@ test('Super Admin college pricing save persists an institution-scoped rule and a
     db.institutionPricingRule.findUnique = originals.collegeFind;
     db.institutionPricingRule.upsert = originals.collegeUpsert;
     db.freePrintPolicyAudit.create = originals.auditCreate;
+  }
+});
+
+test('demo-video admin read returns the latest saved row without creating defaults', async () => {
+  const db = prisma as any;
+  const originalFind = db.demoVideo.findFirst;
+  const originalCreate = db.demoVideo.create;
+  const saved = { id: 'older-random-id', title: 'Current title', videoUrl: 'https://www.youtube-nocookie.com/embed/current', isActive: false };
+  let query: any;
+  let created = false;
+  try {
+    db.demoVideo.findFirst = async (args: any) => { query = args; return saved; };
+    db.demoVideo.create = async () => { created = true; throw new Error('read must not create'); };
+    let body: any;
+    const res: any = { status() { return this; }, json(value: any) { body = value; return this; } };
+    await AdminController.getDemoVideo({} as any, res, (error: unknown) => { throw error; });
+    assert.deepEqual(query.orderBy, [{ updatedAt: 'desc' }, { createdAt: 'desc' }]);
+    assert.equal(body.data.id, saved.id);
+    assert.equal(body.data.isActive, false);
+    assert.equal(created, false);
+  } finally {
+    db.demoVideo.findFirst = originalFind;
+    db.demoVideo.create = originalCreate;
+  }
+});
+
+test('demo-video save updates the existing record and deactivates stale active duplicates', async () => {
+  const db = prisma as any;
+  const originals = { transaction: db.$transaction, findFirst: db.demoVideo.findFirst, update: db.demoVideo.update, create: db.demoVideo.create, updateMany: db.demoVideo.updateMany };
+  const existing = { id: 'legacy-random-id' };
+  let updateArgs: any;
+  let updateManyArgs: any;
+  try {
+    db.$transaction = async (callback: (tx: any) => Promise<any>) => callback(db);
+    db.demoVideo.findFirst = async () => existing;
+    db.demoVideo.update = async (args: any) => { updateArgs = args; return { id: existing.id, ...args.data }; };
+    db.demoVideo.create = async () => { throw new Error('existing row should be updated'); };
+    db.demoVideo.updateMany = async (args: any) => { updateManyArgs = args; return { count: 1 }; };
+    let body: any;
+    const res: any = { status() { return this; }, json(value: any) { body = value; return this; } };
+    await AdminController.saveDemoVideo({ body: { title: 'New demo', description: 'Updated', videoUrl: 'https://www.youtube-nocookie.com/embed/new-video', provider: 'YOUTUBE', isActive: true } } as any, res, (error: unknown) => { throw error; });
+    assert.equal(body.success, true);
+    assert.equal(updateArgs.where.id, existing.id);
+    assert.equal(body.data.videoUrl, 'https://www.youtube-nocookie.com/embed/new-video');
+    assert.deepEqual(updateManyArgs.where, { id: { not: existing.id }, isActive: true });
+    assert.equal(updateManyArgs.data.isActive, false);
+  } finally {
+    db.$transaction = originals.transaction;
+    db.demoVideo.findFirst = originals.findFirst;
+    db.demoVideo.update = originals.update;
+    db.demoVideo.create = originals.create;
+    db.demoVideo.updateMany = originals.updateMany;
+  }
+});
+
+test('demo-video save rejects non-HTTPS URLs without writing settings', async () => {
+  const db = prisma as any;
+  const originalTransaction = db.$transaction;
+  let wrote = false;
+  let statusCode = 0;
+  try {
+    db.$transaction = async () => { wrote = true; throw new Error('invalid URL must not be persisted'); };
+    const res: any = { status(code: number) { statusCode = code; return this; }, json(value: any) { this.body = value; return this; } };
+    await AdminController.saveDemoVideo({ body: { title: 'New demo', videoUrl: 'http://www.youtube-nocookie.com/embed/new-video', provider: 'YOUTUBE', isActive: true } } as any, res, (error: unknown) => { throw error; });
+    assert.equal(statusCode, 400);
+    assert.equal(res.body.success, false);
+    assert.equal(wrote, false);
+  } finally {
+    db.$transaction = originalTransaction;
   }
 });

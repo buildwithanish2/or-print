@@ -11,9 +11,11 @@ export const DemoVideoManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fetchVideo = async () => {
     setLoading(true);
+    setErrorMsg(null);
     try {
       const res = await api.get('/admin/demo-video');
       if (res.data.success && res.data.data) {
@@ -23,9 +25,17 @@ export const DemoVideoManagement: React.FC = () => {
         setVideoUrl(v.videoUrl || '');
         setProvider(v.provider || 'YOUTUBE');
         setIsActive(v.isActive);
+      } else if (res.data.success) {
+        setTitle('');
+        setDescription('');
+        setVideoUrl('');
+        setProvider('YOUTUBE');
+        setIsActive(false);
+      } else {
+        throw new Error(res.data.message || 'Could not load video configuration.');
       }
     } catch (err) {
-      console.error('Failed to load demo video:', err);
+      setErrorMsg(err instanceof Error ? err.message : 'Could not load video configuration.');
     } finally {
       setLoading(false);
     }
@@ -39,6 +49,7 @@ export const DemoVideoManagement: React.FC = () => {
     e.preventDefault();
     setSaving(true);
     setSuccessMsg(null);
+    setErrorMsg(null);
     try {
       const res = await api.post('/admin/demo-video', {
         title,
@@ -49,11 +60,21 @@ export const DemoVideoManagement: React.FC = () => {
       });
 
       if (res.data.success) {
-        setSuccessMsg('Demo video updated successfully! Public homepage reflects these changes.');
+        const saved = res.data.data;
+        if (saved) {
+          setTitle(saved.title || '');
+          setDescription(saved.description || '');
+          setVideoUrl(saved.videoUrl || '');
+          setProvider(saved.provider || 'YOUTUBE');
+          setIsActive(Boolean(saved.isActive));
+        }
+        setSuccessMsg('Video settings saved. The public page will use this video when it is enabled.');
         setTimeout(() => setSuccessMsg(null), 3500);
+      } else {
+        throw new Error(res.data.message || 'Failed to save video configuration.');
       }
-    } catch (err: any) {
-      alert(err.message || 'Failed to save demo video');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save video configuration.');
     } finally {
       setSaving(false);
     }
@@ -80,6 +101,13 @@ export const DemoVideoManagement: React.FC = () => {
           <span>{successMsg}</span>
         </div>
       )}
+      {errorMsg && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs text-rose-300">
+          <span>{errorMsg}</span>
+          {!loading && <button type="button" onClick={() => void fetchVideo()} className="shrink-0 underline">Reload settings</button>}
+        </div>
+      )}
+      {loading && <p role="status" className="text-xs text-slate-400">Loading saved video settings…</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Form */}
@@ -139,7 +167,7 @@ export const DemoVideoManagement: React.FC = () => {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || loading}
               className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center space-x-1.5 transition-all shadow-md shadow-purple-500/20"
             >
               <Save className="w-4 h-4" />
