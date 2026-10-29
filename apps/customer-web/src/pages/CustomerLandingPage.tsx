@@ -31,6 +31,7 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
   const [submitting, setSubmitting] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [pendingTracking, setPendingTracking] = useState<{ orderNumber: string; trackingToken: string } | null>(null);
   const [customerType, setCustomerType] = useState<'REGULAR' | 'STUDENT' | 'TEACHER'>('REGULAR');
   const [customerUser, setCustomerUser] = useState<any>(null);
   const [freeOptions, setFreeOptions] = useState<any>(null);
@@ -150,8 +151,33 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
   }, [shop]);
   const updateSettings = (fileId: string, settings: PrintSettingsDTO) => setFiles((prev) => prev.map((entry) => entry.file.id === fileId ? { ...entry, settings } : entry));
 
+  const openTrackingWhenReady = async (orderNumber: string, trackingToken: string) => {
+    try {
+      const response = await api.get(`/orders/track/${encodeURIComponent(orderNumber)}`, { params: { token: trackingToken } });
+      if (response.data?.success !== true || response.data?.data?.orderNumber !== orderNumber) {
+        throw new Error('Order tracking is not ready yet.');
+      }
+      orderRequestKey.current = null;
+      setPendingTracking(null);
+      setCheckoutError(null);
+      onOrderCreated(orderNumber, trackingToken);
+      return true;
+    } catch {
+      setPendingTracking({ orderNumber, trackingToken });
+      setCheckoutError('Your order was created, but tracking is not available yet. Retry tracking below; your order will not be submitted again.');
+      return false;
+    }
+  };
+
+  const retryTracking = async () => {
+    if (!pendingTracking || submitting) return;
+    setSubmitting(true);
+    await openTrackingWhenReady(pendingTracking.orderNumber, pendingTracking.trackingToken);
+    setSubmitting(false);
+  };
+
   const confirmOrder = async (method: PaymentMethod, customer: { name: string; phone: string }) => {
-    if (!shop || !calculation || submitting) return;
+    if (!shop || !calculation || submitting || pendingTracking) return;
     setSubmitting(true); setCheckoutError(null);
     try {
       if (!orderRequestKey.current) {
@@ -162,9 +188,9 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
       orderRequestKey.current = idempotencyKey;
       const res = await api.post('/orders/create', { idempotencyKey, shopSlug: shop.slug, customerName: customer.name || (freePrintMode ? `Verified ${customerType === 'STUDENT' ? 'Student' : 'Teacher'}` : customerUser?.name) || undefined, customerPhone: customer.phone || customerUser?.phone || undefined, paymentMethod: method, freePrintRequested: freePrintMode, couponCode, items: files.map(({ file, settings }) => ({ fileId: file.id, settings })) });
       if (!res.data.success || !res.data.data?.orderNumber || !res.data.data?.trackingToken) throw new Error(res.data.message || 'The order could not be created.');
-      orderRequestKey.current = null;
       setCheckoutOpen(false);
-      onOrderCreated(res.data.data.orderNumber, res.data.data.trackingToken, res.data.data.trackingUrl);
+      setPendingTracking({ orderNumber: res.data.data.orderNumber, trackingToken: res.data.data.trackingToken });
+      await openTrackingWhenReady(res.data.data.orderNumber, res.data.data.trackingToken);
     } catch (error) { setCheckoutError(error instanceof Error ? error.message : 'The order could not be created. Please try again.'); }
     finally { setSubmitting(false); }
   };
@@ -188,7 +214,7 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
     if (activeFileId === id) setActiveFileId(remaining[0]?.file.id || null);
   };
 
-  const canCheckout = Boolean(shop?.isOnline && calculation && !pricingLoading && !pricingError && !validationErrors.length && (freePrintMode || methods.length) && !submitting && !uploadBusy);
+  const canCheckout = Boolean(shop?.isOnline && calculation && !pricingLoading && !pricingError && !validationErrors.length && (freePrintMode || methods.length) && !submitting && !uploadBusy && !pendingTracking);
   const continueWithPaidPrinting = () => {
     setCustomerType('REGULAR');
     setPricingError(null);
@@ -201,6 +227,7 @@ export const CustomerLandingPage: React.FC<Props> = ({ shopSlug, onOrderCreated 
     <main className="mx-auto grid w-full max-w-5xl gap-4 px-3 py-3 sm:px-5 sm:py-5 md:grid-cols-[minmax(0,1fr)_300px] md:gap-5 md:px-6 md:py-6">
       <div className="min-w-0 space-y-3">
         {shopError && <div role="alert" className="flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-200"><AlertCircle size={17} />{shopError}</div>}
+        {pendingTracking && <div role="alert" className="rounded-xl border border-amber-400/25 bg-amber-400/10 p-3 text-sm text-amber-100"><p>{checkoutError}</p><button type="button" disabled={submitting} onClick={() => void retryTracking()} className="mt-2 min-h-10 rounded-lg border border-amber-300/30 px-3 font-semibold hover:bg-amber-300/10 disabled:opacity-50">{submitting ? 'Checking tracking…' : 'Retry tracking'}</button></div>}
         {shop && !shop.isOnline && <div className="flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100"><AlertCircle size={17} />This shop is currently unavailable. Please check with the counter.</div>}
         <section className="rounded-xl border border-white/[.08] bg-[#141518] p-3 sm:p-4" aria-label="Customer category">
           <div className="flex items-center justify-between"><h2 className="text-sm font-bold text-white">Choose your printing type</h2>{customerUser && <span className="text-[11px] text-emerald-300">Signed in</span>}</div>

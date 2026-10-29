@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment, decryptPaymentCredentialWithKey, encryptPaymentCredentialWithKey, isValidUpiVpa, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../src/services/payment.service';
 import { canReserveFreePrintAllowance, canShopOwnerReviewGuestId, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../src/services/free-print.service';
 import { AuthController } from '../src/controllers/auth.controller';
+import { OrderController } from '../src/controllers/order.controller';
 import { ShopController } from '../src/controllers/shop.controller';
 import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
@@ -35,6 +36,111 @@ test('customer portal URL uses production domain when missing or set to localhos
     else process.env.NODE_ENV = originalNodeEnv;
     if (originalCustomerPortalUrl === undefined) delete process.env.CUSTOMER_PORTAL_URL;
     else process.env.CUSTOMER_PORTAL_URL = originalCustomerPortalUrl;
+  }
+});
+
+test('free-print order creation returns identifiers that the tracking endpoint resolves', async () => {
+  const fileId = '20000000-0000-4000-8000-000000000001';
+  const guestToken = `test-${'a'.repeat(48)}`;
+  const verification: any = {
+    id: 'verification-1', shopId: 'shop-1', institutionId: 'institution-1', requestedRole: 'STUDENT',
+    status: 'APPROVED', active: true, identityHash: 'identity-hash',
+    institution: { id: 'institution-1', name: 'Test College', isActive: true, isEligible: true },
+  };
+  const policy: any = {
+    id: 'global', enabled: true, startsAt: null, expiresAt: null, allowBlackWhite: true, allowColor: true,
+    studentDailyPages: 100, studentMonthlyPages: 1000, studentDailyCopies: 10, studentMonthlyCopies: 100,
+    teacherDailyPages: 100, teacherMonthlyPages: 1000, teacherDailyCopies: 10, teacherMonthlyCopies: 100,
+  };
+  const printer: any = { id: 'printer-1', isDefault: true, status: 'ONLINE', supportsColor: true, supportsDuplex: true, supportedSizes: 'A4' };
+  const file: any = {
+    id: fileId, expiresAt: new Date(Date.now() + 60_000), shopId: 'shop-1', guestVerificationId: verification.id,
+    originalName: 'college-notes.pdf', pageCount: 4, mimeType: 'application/pdf', sizeBytes: 4096,
+    url: '/files/test-pdf', category: 'DOCUMENT',
+  };
+  const stored: any = { items: [], printJobs: [], payments: [] };
+  const db = prisma as any;
+  const original = {
+    orderFindUnique: db.order.findUnique,
+    shopFindUnique: db.shop.findUnique,
+    fileFindUnique: db.fileRecord.findUnique,
+    pricingRuleFindFirst: db.pricingRule.findFirst,
+    verificationFindUnique: db.guestInstitutionVerification.findUnique,
+    policyFindUnique: db.freePrintPolicy.findUnique,
+    shopSettingFindUnique: db.freePrintShopSetting.findUnique,
+    institutionFindUnique: db.institution.findUnique,
+    usageFindUnique: db.freePrintUsage.findUnique,
+    transaction: db.$transaction,
+  };
+  const tx: any = {
+    order: { create: async ({ data }: any) => Object.assign(stored, data, { id: 'order-1' }) },
+    orderItem: { create: async ({ data }: any) => { const item = { ...data, id: 'item-1', file }; stored.items.push(item); return item; } },
+    printJob: { create: async ({ data }: any) => { const job = { ...data, id: 'job-1', attempts: 0, maxAttempts: 3, createdAt: new Date() }; stored.printJobs.push(job); return job; } },
+    freePrintPolicy: { findUnique: async () => policy },
+    guestInstitutionVerification: { findUnique: async () => verification },
+    freePrintShopSetting: { findUnique: async () => ({ participating: true }) },
+    printer: { findFirst: async () => printer },
+    freePrintUsage: { upsert: async () => ({} ) },
+    $executeRaw: async () => 1,
+    freePrintReservation: { create: async () => ({ id: 'reservation-1' }) },
+  };
+
+  try {
+    db.order.findUnique = async ({ where }: any) => {
+      if (where.idempotencyKey) return null;
+      if (where.id === stored.id || where.orderNumber === stored.orderNumber) return stored.id ? { ...stored, shop: { id: 'shop-1', name: 'Test Shop', slug: 'test-shop', phone: null, address: null, logoUrl: null } } : null;
+      return null;
+    };
+    db.shop.findUnique = async () => ({ id: 'shop-1', name: 'Test Shop', slug: 'test-shop', status: 'ACTIVE', isOnline: true, printers: [printer] });
+    db.fileRecord.findUnique = async () => file;
+    db.pricingRule.findFirst = async () => null;
+    db.guestInstitutionVerification.findUnique = async () => verification;
+    db.freePrintPolicy.findUnique = async () => policy;
+    db.freePrintShopSetting.findUnique = async () => ({ participating: true });
+    db.institution.findUnique = async () => verification.institution;
+    db.freePrintUsage.findUnique = async () => null;
+    db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
+
+    const requestBody: any = {
+      shopSlug: 'test-shop', idempotencyKey: 'order-key-for-free-print-001', freePrintRequested: true,
+      paymentMethod: 'PAY_AT_COUNTER', items: [{ fileId, settings: { colorMode: 'BW', paperSize: 'A4', orientation: 'PORTRAIT', duplexMode: 'SIMPLEX', copies: 1, pageRange: 'ALL', pagesPerSheet: 1, quality: 'NORMAL' } }],
+    };
+    const makeResponse = () => ({ statusCode: 200, body: undefined as any, status(code: number) { this.statusCode = code; return this; }, json(body: any) { this.body = body; return this; } });
+    const createResponse = makeResponse();
+    let createError: unknown;
+    await OrderController.createOrder({ body: requestBody, get: (header: string) => header === 'X-Free-Print-Token' ? guestToken : undefined } as any, createResponse as any, (error: unknown) => { createError = error; });
+    assert.equal(createError, undefined);
+    assert.equal(createResponse.statusCode, 201);
+    assert.equal(createResponse.body.success, true);
+    assert.equal(createResponse.body.data.totalAmount, 0);
+    assert.equal(createResponse.body.data.freePrint.eligible, true);
+    assert.equal(stored.orderNumber, createResponse.body.data.orderNumber);
+    assert.equal(stored.trackingToken, createResponse.body.data.trackingToken);
+
+    const track = async (orderNumber: string, token: string) => {
+      const response = makeResponse();
+      let error: unknown;
+      await OrderController.getOrderByNumber({ params: { orderNumber }, query: { token } } as any, response as any, (caught: unknown) => { error = caught; });
+      assert.equal(error, undefined);
+      return response;
+    };
+    const tracked = await track(stored.orderNumber, stored.trackingToken);
+    assert.equal(tracked.statusCode, 200);
+    assert.equal(tracked.body.data.orderNumber, createResponse.body.data.orderNumber);
+    assert.equal(tracked.body.data.trackingToken, undefined);
+    assert.equal((await track('ANP-000000', stored.trackingToken)).statusCode, 404);
+    assert.equal((await track(stored.orderNumber, `${stored.trackingToken}-invalid`)).statusCode, 404);
+  } finally {
+    db.order.findUnique = original.orderFindUnique;
+    db.shop.findUnique = original.shopFindUnique;
+    db.fileRecord.findUnique = original.fileFindUnique;
+    db.pricingRule.findFirst = original.pricingRuleFindFirst;
+    db.guestInstitutionVerification.findUnique = original.verificationFindUnique;
+    db.freePrintPolicy.findUnique = original.policyFindUnique;
+    db.freePrintShopSetting.findUnique = original.shopSettingFindUnique;
+    db.institution.findUnique = original.institutionFindUnique;
+    db.freePrintUsage.findUnique = original.usageFindUnique;
+    db.$transaction = original.transaction;
   }
 });
 
