@@ -27,7 +27,10 @@ export const DemoVideoManagement: React.FC = () => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await api.get('/admin/demo-video');
+      const res = await api.get('/admin/demo-video', {
+        params: { _refresh: Date.now() },
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      });
       if (res.data.success && res.data.data) {
         const v = res.data.data;
         setTitle(v.title || '');
@@ -78,7 +81,21 @@ export const DemoVideoManagement: React.FC = () => {
       });
 
       if (res.data.success) {
-        const saved = res.data.data;
+        // Verify the write with an uncached read. A successful POST response
+        // alone is not enough if the deployed API/database did not persist it.
+        const verifyRes = await api.get('/admin/demo-video', {
+          params: { _refresh: Date.now() },
+          headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+        });
+        const saved = verifyRes.data?.success ? verifyRes.data.data : null;
+        const expectedDescription = description ? description.slice(0, 2000) : null;
+        if (!saved
+          || saved.videoUrl !== normalizedVideoUrl
+          || saved.title !== title.trim()
+          || (saved.description || null) !== expectedDescription
+          || Boolean(saved.isActive) !== isActive) {
+          throw new Error('The API accepted the save but a fresh read still returned older settings. The API deployment or database persistence needs attention.');
+        }
         if (saved) {
           setTitle(saved.title || '');
           setDescription(saved.description || '');
