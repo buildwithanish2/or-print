@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getAdminPathForTab, getAdminTabFromPath } from '../src/lib/admin-navigation.mjs';
 import { readStoredAdminUser } from '../src/lib/admin-session.mjs';
+import { getUsageIdentity } from '../src/lib/usage-display.mjs';
 
 test('College sidebar navigation resolves to the College management page', () => {
   assert.equal(getAdminPathForTab('college-free-printing'), '/college-free-printing');
@@ -25,4 +26,13 @@ test('broken saved admin session data falls back to login instead of crashing th
 
 test('valid administrator session data is restored', () => {
   assert.deepEqual(readStoredAdminUser({ getItem: () => JSON.stringify({ id: 'admin-1', role: 'SUPER_ADMIN' }) }), { id: 'admin-1', role: 'SUPER_ADMIN' });
+});
+
+test('guest allowance records render without a linked account or exposing the identity hash', () => {
+  assert.deepEqual(getUsageIdentity({ user: null, guestIdentityHash: 'private-hash' }), { name: 'Guest user', role: 'Guest' });
+  assert.deepEqual(getUsageIdentity({}), { name: 'Guest user', role: 'Guest' });
+});
+
+test('registered allowance records display their linked account', () => {
+  assert.deepEqual(getUsageIdentity({ user: { name: 'A Student', role: 'STUDENT' } }), { name: 'A Student', role: 'STUDENT' });
 });
