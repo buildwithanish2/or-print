@@ -25,7 +25,7 @@ services:
       RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
       NODE_ENV: "production"
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     volumes:
       - upload_data:/app/uploads
       - evidence_data:/app/private-college-evidence
