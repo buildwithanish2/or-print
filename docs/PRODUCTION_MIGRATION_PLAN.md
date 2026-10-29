@@ -10,6 +10,7 @@ The checked-in SQL migrations in dependency order are:
 2. `20261029_college_free_printing/migration.sql`
 3. `20261029_guest_shop_id_verification/migration.sql`
 4. `20261030_auth_contact_tokens/migration.sql` (new; adds three `User` columns and `AuthActionToken`)
+5. `20261031_shop_welcome_email_dedupe/migration.sql` (adds nullable `User.welcomeEmailSentAt` for welcome-email deduplication)
 
 The local DB has migrations 1–3 feature tables/columns but no Prisma migration ledger; the new auth migration has not been applied. Production must be independently inspected for each table/column before applying anything. If production already contains any feature addition without matching schema or the ledger is ambiguous, stop and reconcile manually; do not replay SQL blindly.
 
@@ -47,6 +48,20 @@ sqlite3.exe $db 'PRAGMA table_info("AuthActionToken");'
 
 For production databases missing migrations 1–3, first stage each against a copy of the backup and validate compatibility; do not assume the local state. Record the deployed revision, migration filenames, checksums, before/after counts, and operator. This project currently has no Prisma migration ledger; these SQL files are applied as an explicitly reviewed manual sequence, not via `prisma migrate deploy`.
 
+For this email feature, first verify the database already has the schema from migration 4 (`emailVerifiedAt`, `emailVerificationRequired`, `sessionVersion`, and `AuthActionToken`) and does not already have `welcomeEmailSentAt`. After a fresh verified backup, apply only migration 5:
+
+```powershell
+$db = 'D:\OR-PRINT-DATA\printqr.db' # independently verified production path
+$migration = (Resolve-Path 'apps\api\prisma\migrations\20261031_shop_welcome_email_dedupe\migration.sql').Path
+sqlite3.exe $db ".read `"$migration`""
+if ($LASTEXITCODE -ne 0) { throw 'Welcome-email migration failed; keep traffic stopped and investigate before restoring the verified backup' }
+sqlite3.exe $db 'PRAGMA quick_check;'
+sqlite3.exe $db 'PRAGMA foreign_key_check;'
+sqlite3.exe $db 'PRAGMA table_info("User");'
+```
+
+Confirm `welcomeEmailSentAt` appears once and all prior columns and rows remain intact. Do not apply migration 5 to a database missing its prerequisite schema, and do not run it if that column already exists.
+
 ## Rollback
 
 There is no down migration. On an additive migration failure, keep application writers stopped, preserve the failed database for diagnosis, and restore the verified pre-change SQLite backup as a whole-file recovery operation after operator approval. This rolls back writes made after the backup too, so do not restore over a live database without a reviewed recovery plan. For a successful migration followed by an application rollback, retain the additive schema and run the prior compatible application only if compatibility has been verified. Never delete user, shop, order, payment, or verification data.
@@ -59,3 +74,4 @@ No production backup, migration, database replacement, or deployment was perform
 - The new SQL was run against a disposable copy of that file: `PRAGMA quick_check` returned `ok`, `PRAGMA foreign_key_check` returned no rows, and expected auth columns/table were present.
 - `npx prisma validate --schema apps/api/prisma/schema.prisma` passed.
 - The exact production state remains unverified because the Docker named volume/production host is not available here.
+- The new welcome-email migration was applied only to a disposable in-memory SQLite database to verify its SQL syntax and additive column; the configured local database and production database were not modified.
