@@ -57,6 +57,14 @@ export const DemoVideoManagement: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedVideoUrl = provider === 'DIRECT' ? previewDirectUrl : previewEmbedUrl;
+    if (!normalizedVideoUrl) {
+      setSuccessMsg(null);
+      setErrorMsg(provider === 'DIRECT'
+        ? 'Enter a valid HTTPS MP4 URL before saving.'
+        : 'Enter a valid HTTPS YouTube or Vimeo link before saving.');
+      return;
+    }
     setSaving(true);
     setSuccessMsg(null);
     setErrorMsg(null);
@@ -64,7 +72,7 @@ export const DemoVideoManagement: React.FC = () => {
       const res = await api.post('/admin/demo-video', {
         title,
         description,
-        videoUrl,
+        videoUrl: normalizedVideoUrl,
         provider,
         isActive,
       });
