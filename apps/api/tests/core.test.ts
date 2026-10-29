@@ -7,6 +7,9 @@ import crypto from 'crypto';
 import { canCollectCashPayment, canManageShopPayment, canReviewManualUpiPayment, decryptPaymentCredentialWithKey, encryptPaymentCredentialWithKey, isValidUpiVpa, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../src/services/payment.service';
 import { canReserveFreePrintAllowance, canShopOwnerReviewGuestId, hashCollegeIdNumber, hashGuestAccessToken, isFreePrintPolicyActive, kolkataPeriodKeys } from '../src/services/free-print.service';
 import { AuthController } from '../src/controllers/auth.controller';
+import { ShopController } from '../src/controllers/shop.controller';
+import { prisma } from '../src/prisma';
+import { EmailService } from '../src/services/email.service';
 import { requireAdmin } from '../src/middleware/rbac.middleware';
 import { errorHandler } from '../src/middleware/error.middleware';
 
@@ -151,6 +154,9 @@ test('public auth registration is rejected for customer, student, teacher, and a
 });
 
 test('password recovery stays unavailable without delivery configuration and invalid reset input is rejected', async () => {
+  const smtpKeys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM_EMAIL', 'SMTP_FROM'];
+  const previousSmtpValues = new Map(smtpKeys.map((key) => [key, process.env[key]]));
+  smtpKeys.forEach((key) => { delete process.env[key]; });
   let forgotStatus = 0;
   let forgotBody: any;
   const forgotResponse = { status(code: number) { forgotStatus = code; return this; }, json(body: unknown) { forgotBody = body; return this; } };
@@ -165,6 +171,309 @@ test('password recovery stays unavailable without delivery configuration and inv
   await AuthController.resetPassword({ body: { token: 'invalid', password: 'long-password-value' } } as any, resetResponse as any, (() => { throw new Error('Unexpected error path'); }) as any);
   assert.equal(resetStatus, 400);
   assert.equal('data' in resetBody, false);
+  previousSmtpValues.forEach((value, key) => { if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+});
+
+test('SMTP configuration validates TLS, sender fields, and never requires frontend configuration', () => {
+  const smtpKeys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM_EMAIL', 'SMTP_FROM_NAME', 'SMTP_FROM'];
+  const previousSmtpValues = new Map(smtpKeys.map((key) => [key, process.env[key]]));
+  try {
+    smtpKeys.forEach((key) => { delete process.env[key]; });
+    assert.equal(EmailService.isConfigured(), false);
+    process.env.SMTP_HOST = 'smtp.example.test';
+    process.env.SMTP_PORT = '465';
+    process.env.SMTP_USER = 'mailer@example.test';
+    process.env.SMTP_PASS = 'test-only-password';
+    process.env.SMTP_FROM_EMAIL = 'no-reply@example.test';
+    process.env.SMTP_FROM_NAME = 'AnishNova Print';
+    assert.equal(EmailService.isConfigured(), true);
+    process.env.SMTP_PORT = 'bad-port';
+    assert.equal(EmailService.isConfigured(), false);
+    process.env.SMTP_PORT = '587';
+    process.env.SMTP_SECURE = 'sometimes';
+    assert.equal(EmailService.isConfigured(), false);
+    process.env.SMTP_SECURE = 'false';
+    assert.equal(EmailService.isConfigured(), true);
+  } finally {
+    previousSmtpValues.forEach((value, key) => { if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  }
+});
+
+test('verification, reset, and welcome messages use mocked SMTP with plain text and escaped HTML', async () => {
+  const smtpKeys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM_EMAIL', 'SMTP_FROM_NAME', 'SMTP_FROM'];
+  const previousSmtpValues = new Map(smtpKeys.map((key) => [key, process.env[key]]));
+  const messages: any[] = [];
+  const transportConfigurations: any[] = [];
+  try {
+    smtpKeys.forEach((key) => { delete process.env[key]; });
+    process.env.SMTP_HOST = 'smtp.example.test';
+    process.env.SMTP_PORT = '587';
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_USER = 'mailer@example.test';
+    process.env.SMTP_PASS = 'test-only-password';
+    process.env.SMTP_FROM_EMAIL = 'no-reply@example.test';
+    process.env.SMTP_FROM_NAME = 'AnishNova Print';
+    EmailService.setTransporterFactoryForTests((configuration) => {
+      transportConfigurations.push(configuration);
+      return { sendMail: async (message: any) => { messages.push(message); return {}; }, close: () => undefined } as any;
+    });
+
+    assert.equal(await EmailService.sendActionLink('owner@example.test', 'https://shop.example.test/verify-email#token=opaque-token', 'verify'), true);
+    assert.equal(await EmailService.sendActionLink('owner@example.test', 'https://shop.example.test/reset-password#token=opaque-token', 'reset'), true);
+    assert.equal(await EmailService.sendWelcomeEmail({
+      to: 'owner@example.test', ownerName: '<Owner>', shopName: 'A&B Print', planName: 'Starter',
+      shopUrl: 'https://shop.example.test', customerUrl: 'https://customer.example.test/print/a-b',
+    }), true);
+
+    assert.equal(messages.length, 3);
+    assert.equal(transportConfigurations[0].secure, false);
+    assert.equal(messages[0].from.address, 'no-reply@example.test');
+    assert.match(messages[0].text, /verify-email#token=opaque-token/);
+    assert.match(messages[1].subject, /Reset/);
+    assert.match(messages[1].text, /reset-password#token=opaque-token/);
+    assert.match(messages[2].html, /&lt;Owner&gt;/);
+    assert.match(messages[2].html, /A&amp;B Print/);
+    assert.match(messages[2].text, /https:\/\/shop.example.test\/login/);
+    assert.doesNotMatch(messages[2].html, /pairing PIN|pairing code/i);
+
+    EmailService.setTransporterFactoryForTests(() => ({
+      sendMail: async () => { throw new Error('mock SMTP rejection'); },
+      close: () => undefined,
+    } as any));
+    await assert.rejects(() => EmailService.sendActionLink('owner@example.test', 'https://shop.example.test/reset-password#token=opaque-token', 'reset'), /mock SMTP rejection/);
+  } finally {
+    EmailService.setTransporterFactoryForTests(null);
+    previousSmtpValues.forEach((value, key) => { if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  }
+});
+
+test('shop registration emails happen after account creation, duplicates do not resend, and SMTP failures stay pending', async () => {
+  const envKeys = ['NODE_ENV', 'SHOP_PORTAL_URL', 'CUSTOMER_PORTAL_URL', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM_EMAIL', 'SMTP_FROM_NAME', 'SMTP_FROM'];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const db = prisma as any;
+  const original = {
+    userFindUnique: db.user.findUnique,
+    userUpdateMany: db.user.updateMany,
+    shopFindUnique: db.shop.findUnique,
+    planFindUnique: db.subscriptionPlan.findUnique,
+    tokenCreate: db.authActionToken.create,
+    tokenUpdateMany: db.authActionToken.updateMany,
+    transaction: db.$transaction,
+  };
+  let existingUser: any = null;
+  let createdUserCount = 0;
+  const messages: any[] = [];
+  let shouldFailDelivery = false;
+  const tx = {
+    user: { create: async ({ data }: any) => { createdUserCount += 1; return { ...data, id: `user-${createdUserCount}` }; } },
+    shop: { create: async ({ data }: any) => ({ ...data, id: `shop-${createdUserCount}` }) },
+    shopSubscription: { create: async () => ({}) },
+    subscriptionPaymentAttempt: { updateMany: async () => ({ count: 1 }) },
+    qRCodeRecord: { create: async () => ({}) },
+    pricingRule: { create: async () => ({}) },
+    printer: { create: async () => ({}) },
+    printerAgent: { create: async () => ({}) },
+  };
+
+  try {
+    process.env.NODE_ENV = 'test';
+    process.env.SHOP_PORTAL_URL = 'https://shop.example.test';
+    process.env.CUSTOMER_PORTAL_URL = 'https://customer.example.test';
+    process.env.SMTP_HOST = 'smtp.example.test';
+    process.env.SMTP_PORT = '587';
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_USER = 'mailer@example.test';
+    process.env.SMTP_PASS = 'test-only-password';
+    process.env.SMTP_FROM_EMAIL = 'no-reply@example.test';
+    process.env.SMTP_FROM_NAME = 'AnishNova Print';
+    db.user.findUnique = async () => existingUser;
+    db.user.updateMany = async () => ({ count: 1 });
+    db.shop.findUnique = async () => null;
+    db.subscriptionPlan.findUnique = async () => ({ id: 'plan-free', name: 'Free', priceMonthly: 0 });
+    db.authActionToken.create = async () => ({});
+    db.authActionToken.updateMany = async () => ({ count: 1 });
+    db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
+    EmailService.setTransporterFactoryForTests(() => ({
+      sendMail: async (message: any) => {
+        assert.ok(createdUserCount > 0, 'registration email must be sent only after the account transaction');
+        if (shouldFailDelivery) throw new Error('mock SMTP rejection');
+        messages.push(message);
+        return { accepted: [message.to], rejected: [] };
+      },
+      close: () => undefined,
+    } as any));
+
+    const invokeRegistration = async () => {
+      let statusCode = 0;
+      let body: any;
+      const response = { status(code: number) { statusCode = code; return this; }, json(value: any) { body = value; return this; } };
+      let passedError: unknown;
+      await ShopController.registerShop({ body: {
+        shopName: 'Example Print', ownerName: 'Shop Owner', email: 'owner@example.test', phone: '9876543210',
+        password: 'correct-horse-battery-9', planId: 'plan-free', address: 'Market Road', city: 'Bengaluru',
+        state: 'Karnataka', pin: '560001',
+      } } as any, response as any, ((error: unknown) => { passedError = error; }) as any);
+      if (passedError) throw passedError;
+      return { statusCode, body };
+    };
+
+    const first = await invokeRegistration();
+    assert.equal(first.statusCode, 201);
+    assert.equal(first.body.data.emailSent, true);
+    assert.equal(first.body.data.welcomeEmailSent, true);
+    assert.equal(messages.length, 2);
+    assert.match(messages[0].text, /verify-email#token=/);
+    assert.match(messages[1].text, /Shop Dashboard: https:\/\/shop.example.test\/login/);
+
+    existingUser = { id: 'user-1', email: 'owner@example.test' };
+    const duplicate = await invokeRegistration();
+    assert.equal(duplicate.statusCode, 409);
+    assert.equal(messages.length, 2);
+
+    existingUser = null;
+    shouldFailDelivery = true;
+    const unavailable = await invokeRegistration();
+    assert.equal(unavailable.statusCode, 201);
+    assert.equal(unavailable.body.data.emailSent, false);
+    assert.equal(unavailable.body.data.welcomeEmailSent, false);
+    assert.equal('token' in unavailable.body.data, false);
+  } finally {
+    EmailService.setTransporterFactoryForTests(null);
+    db.user.findUnique = original.userFindUnique;
+    db.user.updateMany = original.userUpdateMany;
+    db.shop.findUnique = original.shopFindUnique;
+    db.subscriptionPlan.findUnique = original.planFindUnique;
+    db.authActionToken.create = original.tokenCreate;
+    db.authActionToken.updateMany = original.tokenUpdateMany;
+    db.$transaction = original.transaction;
+    previousEnv.forEach((value, key) => { if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  }
+});
+
+test('password recovery is generic, cooldown-limited, hash-only, single-use, and revokes existing sessions', async () => {
+  const envKeys = ['NODE_ENV', 'SHOP_PORTAL_URL', 'CUSTOMER_PORTAL_URL', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM_EMAIL', 'SMTP_FROM_NAME', 'SMTP_FROM'];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const db = prisma as any;
+  const original = {
+    userFindUnique: db.user.findUnique,
+    userUpdate: db.user.update,
+    auditCreate: db.auditLog.create,
+    transaction: db.$transaction,
+  };
+  const user: any = { id: 'owner-1', email: 'owner@example.test', name: 'Owner', role: 'SHOP_OWNER', isActive: true, sessionVersion: 0, passwordHash: 'old-hash' };
+  let accountExists = true;
+  let action: any = null;
+  const messages: any[] = [];
+  const tx = {
+    authActionToken: {
+      findFirst: async () => action ? { createdAt: action.createdAt } : null,
+      findUnique: async ({ where }: any) => action?.tokenHash === where.tokenHash ? action : null,
+      create: async ({ data }: any) => { action = { ...data, id: 'action-1', userId: user.id, createdAt: new Date(), usedAt: null }; return action; },
+      updateMany: async ({ where, data }: any) => {
+        if (!action || (where.id && where.id !== action.id) || (where.tokenHash && where.tokenHash !== action.tokenHash)) return { count: 0 };
+        if (where.usedAt === null && action.usedAt) return { count: 0 };
+        if (where.expiresAt?.gt && action.expiresAt <= where.expiresAt.gt) return { count: 0 };
+        action = { ...action, ...data };
+        return { count: 1 };
+      },
+    },
+    user: {
+      update: async ({ data }: any) => {
+        user.passwordHash = data.passwordHash;
+        user.sessionVersion += data.sessionVersion.increment;
+        return { email: user.email, name: user.name };
+      },
+    },
+  };
+
+  try {
+    process.env.NODE_ENV = 'test';
+    process.env.SHOP_PORTAL_URL = 'https://shop.example.test';
+    process.env.CUSTOMER_PORTAL_URL = 'https://customer.example.test';
+    process.env.SMTP_HOST = 'smtp.example.test';
+    process.env.SMTP_PORT = '587';
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_USER = 'mailer@example.test';
+    process.env.SMTP_PASS = 'test-only-password';
+    process.env.SMTP_FROM_EMAIL = 'no-reply@example.test';
+    db.user.findUnique = async () => accountExists ? user : null;
+    db.user.update = async () => user;
+    db.auditLog.create = async () => ({});
+    db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
+    EmailService.setTransporterFactoryForTests(() => ({
+      sendMail: async (message: any) => { messages.push(message); return { accepted: [message.to], rejected: [] }; },
+      close: () => undefined,
+    } as any));
+
+    const requestReset = async () => {
+      let statusCode = 0;
+      let body: any;
+      const response = { status(code: number) { statusCode = code; return this; }, json(value: any) { body = value; return this; } };
+      await AuthController.forgotPassword({ body: { email: 'owner@example.test' } } as any, response as any, ((error: unknown) => { throw error; }) as any);
+      return { statusCode, body };
+    };
+    const first = await requestReset();
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.body.message, 'If an eligible account exists, recovery instructions will be sent.');
+    assert.equal('token' in first.body, false);
+    assert.match(messages[0].text, /https:\/\/shop.example.test\/reset-password#token=/);
+    const rawToken = messages[0].text.match(/#token=([A-Za-z0-9_-]+)/)?.[1];
+    assert.ok(rawToken);
+    assert.notEqual(action.tokenHash, rawToken);
+    assert.equal(action.tokenHash, crypto.createHash('sha256').update(rawToken!).digest('hex'));
+
+    const cooldown = await requestReset();
+    assert.equal(cooldown.statusCode, 200);
+    assert.equal(messages.length, 1);
+    accountExists = false;
+    const unknown = await requestReset();
+    assert.deepEqual(unknown.body, first.body);
+    assert.equal(messages.length, 1);
+    accountExists = true;
+
+    action.expiresAt = new Date(Date.now() - 1_000);
+    let expiredStatus = 0;
+    const expiredResponse = { status(code: number) { expiredStatus = code; return this; }, json() { return this; } };
+    await AuthController.resetPassword({ body: { token: rawToken, password: 'a-new-secure-password-123' } } as any, expiredResponse as any, ((error: unknown) => { throw error; }) as any);
+    assert.equal(expiredStatus, 400);
+    assert.equal(user.sessionVersion, 0);
+
+    action.expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    let resetStatus = 0;
+    let resetBody: any;
+    const resetResponse = { status(code: number) { resetStatus = code; return this; }, json(value: any) { resetBody = value; return this; } };
+    await AuthController.resetPassword({ body: { token: rawToken, password: 'a-new-secure-password-123' } } as any, resetResponse as any, ((error: unknown) => { throw error; }) as any);
+    assert.equal(resetStatus, 200);
+    assert.equal(user.sessionVersion, 1);
+    assert.match(user.passwordHash, /^\$2[aby]\$/);
+    assert.notEqual(user.passwordHash, 'a-new-secure-password-123');
+    assert.equal(action.usedAt instanceof Date, true);
+    assert.equal('token' in resetBody, false);
+    assert.match(messages[1].subject, /password was changed/i);
+
+    let loginStatus = 0;
+    let loginBody: any;
+    const loginResponse = { status(code: number) { loginStatus = code; return this; }, json(value: any) { loginBody = value; return this; } };
+    user.emailVerificationRequired = false;
+    user.ownedShops = [];
+    user.staffMembers = [];
+    await AuthController.login({ body: { email: user.email, password: 'a-new-secure-password-123' }, ip: '127.0.0.1', get: () => 'email-test' } as any, loginResponse as any, ((error: unknown) => { throw error; }) as any);
+    assert.equal(loginStatus, 200);
+    assert.equal(loginBody.success, true);
+
+    let reusedStatus = 0;
+    const reusedResponse = { status(code: number) { reusedStatus = code; return this; }, json() { return this; } };
+    await AuthController.resetPassword({ body: { token: rawToken, password: 'another-secure-password-456' } } as any, reusedResponse as any, ((error: unknown) => { throw error; }) as any);
+    assert.equal(reusedStatus, 400);
+    assert.equal(user.sessionVersion, 1);
+  } finally {
+    EmailService.setTransporterFactoryForTests(null);
+    db.user.findUnique = original.userFindUnique;
+    db.user.update = original.userUpdate;
+    db.auditLog.create = original.auditCreate;
+    db.$transaction = original.transaction;
+    previousEnv.forEach((value, key) => { if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  }
 });
 
 test('shop registration accepts only the shop onboarding payload and refuses role overrides', () => {

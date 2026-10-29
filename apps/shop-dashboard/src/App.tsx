@@ -14,6 +14,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ShopSettingsPage } from './pages/ShopSettingsPage';
 import { SupportPage } from './pages/SupportPage';
 import { CollegeFreePrintingPage } from './pages/CollegeFreePrintingPage';
+import { ShopAccountActionPage } from './pages/ShopAccountActionPage';
 import { CUSTOMER_PORTAL_URL } from './lib/api';
 import {
   LayoutDashboard,
@@ -63,6 +64,11 @@ export const App: React.FC = () => {
     | 'college-free-printing'
   >('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const actionPath = window.location.pathname;
+  if (actionPath === '/verify-email') return <ShopAccountActionPage mode="verify" />;
+  if (actionPath === '/forgot-password') return <ShopAccountActionPage mode="forgot" />;
+  if (actionPath === '/reset-password') return <ShopAccountActionPage mode="reset" />;
 
   const handleLogout = () => {
     localStorage.removeItem('printqr_shop_token');

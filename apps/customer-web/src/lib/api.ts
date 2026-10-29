@@ -14,7 +14,9 @@ export class ApiRequestError extends Error {
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 export const API_ROOT_URL = API_BASE_URL.replace(/\/$/, '');
-export const SHOP_PORTAL_URL = import.meta.env.VITE_SHOP_URL || 'http://localhost:5174';
+export const SHOP_PORTAL_URL = import.meta.env.PROD
+  ? 'https://shop-dashboard-one-eosin.vercel.app'
+  : import.meta.env.VITE_SHOP_URL || 'http://localhost:5174';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

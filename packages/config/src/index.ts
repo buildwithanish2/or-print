@@ -194,8 +194,8 @@ export const SAAS_PLANS_DATA = [
 ];
 
 export const getApiBaseUrl = (): string => {
-  if (typeof process !== 'undefined' && process.env?.PUBLIC_API_URL) {
-    return process.env.PUBLIC_API_URL.replace(/\/$/, '');
+  if (typeof process !== 'undefined' && (process.env?.API_PUBLIC_URL || process.env?.PUBLIC_API_URL)) {
+    return (process.env.API_PUBLIC_URL || process.env.PUBLIC_API_URL)!.replace(/\/$/, '');
   }
   return 'http://localhost:5000';
 };
@@ -208,8 +208,8 @@ export const getCustomerWebUrl = (): string => {
 };
 
 export const getShopWebUrl = (): string => {
-  if (typeof process !== 'undefined' && process.env?.SHOP_PORTAL_URL) {
-    return process.env.SHOP_PORTAL_URL.replace(/\/$/, '');
+  if (typeof process !== 'undefined' && (process.env?.SHOP_PORTAL_URL || process.env?.APP_PUBLIC_URL)) {
+    return (process.env.SHOP_PORTAL_URL || process.env.APP_PUBLIC_URL)!.replace(/\/$/, '');
   }
   return 'http://localhost:5174';
 };

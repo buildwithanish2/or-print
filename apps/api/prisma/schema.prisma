@@ -18,6 +18,7 @@ model User {
   isActive     Boolean  @default(true)
   emailVerifiedAt DateTime?
   emailVerificationRequired Boolean @default(false)
+  welcomeEmailSentAt DateTime?
   sessionVersion Int @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

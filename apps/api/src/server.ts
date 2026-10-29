@@ -24,7 +24,10 @@ const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 if (NODE_ENV === 'production') {
-  const requiredHttpsUrls = ['PUBLIC_API_URL', 'CUSTOMER_PORTAL_URL', 'SHOP_PORTAL_URL', 'ADMIN_PORTAL_URL'];
+  const requiredHttpsUrls = [
+    process.env.API_PUBLIC_URL ? 'API_PUBLIC_URL' : 'PUBLIC_API_URL',
+    'CUSTOMER_PORTAL_URL', 'SHOP_PORTAL_URL', 'ADMIN_PORTAL_URL',
+  ];
   const invalidUrls = requiredHttpsUrls.filter((name) => {
     const value = process.env[name];
     if (!value) return true;

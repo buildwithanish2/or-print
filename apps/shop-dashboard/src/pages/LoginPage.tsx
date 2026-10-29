@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api, CUSTOMER_PORTAL_URL } from '../lib/api';
+import { api } from '../lib/api';
 import { Printer, Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
@@ -107,7 +107,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
-          <a className="block text-center text-xs text-blue-300 hover:text-blue-200 underline" href={`${CUSTOMER_PORTAL_URL}/reset-password`}>Forgot password?</a>
+          <a className="block text-center text-xs text-blue-300 hover:text-blue-200 underline" href="/forgot-password">Forgot password?</a>
         </div>
       </div>
     </div>
