@@ -23,7 +23,7 @@ export function agentArtifactDownloadHeaders(fileSize: number, downloadName: str
     'Content-Disposition': `attachment; filename="${downloadName}"`,
     'Content-Type': 'application/vnd.microsoft.portable-executable',
     'Content-Length': fileSize,
-    'Cache-Control': 'public, max-age=300',
+    'Cache-Control': 'private, no-store, max-age=0',
     'X-Content-Type-Options': 'nosniff',
   };
 }

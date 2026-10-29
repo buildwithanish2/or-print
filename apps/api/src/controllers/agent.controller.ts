@@ -264,6 +264,7 @@ export class AgentController {
     try {
       const channel = (req.query.channel as string) || 'stable';
       const release = agentReleaseMetadata();
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
       if (!release) return res.status(503).json({ success: false, message: 'Windows Print Agent update is temporarily unavailable.' });
 
       return res.status(200).json({

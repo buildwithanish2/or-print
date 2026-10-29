@@ -365,7 +365,7 @@ test('agent downloads use executable attachment headers with verified byte lengt
     'Content-Disposition': 'attachment; filename="AnishNovaPrintAgent-Setup.exe"',
     'Content-Type': 'application/vnd.microsoft.portable-executable',
     'Content-Length': 1234567,
-    'Cache-Control': 'public, max-age=300',
+    'Cache-Control': 'private, no-store, max-age=0',
     'X-Content-Type-Options': 'nosniff',
   });
 });

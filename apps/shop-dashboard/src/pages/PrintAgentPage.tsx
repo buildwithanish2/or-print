@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api, API_BASE_URL } from '../lib/api';
+import { getAgentInstallerUrl, parseAgentReleaseResponse, type AgentRelease } from '../lib/agent-release';
 import {
   Laptop,
   Download,
@@ -23,6 +24,26 @@ export const PrintAgentPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(600); // 10 mins (600s)
   const [agentStatus, setAgentStatus] = useState<any>(null);
+  const [agentRelease, setAgentRelease] = useState<AgentRelease | null>(null);
+  const [loadingRelease, setLoadingRelease] = useState(true);
+  const [releaseError, setReleaseError] = useState('');
+
+  const loadAgentRelease = useCallback(async () => {
+    setLoadingRelease(true);
+    setReleaseError('');
+    try {
+      const response = await api.get('/agents/update/latest', {
+        params: { channel: 'stable', refresh: Date.now() },
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      });
+      setAgentRelease(parseAgentReleaseResponse(response.data, API_BASE_URL));
+    } catch (error) {
+      setAgentRelease(null);
+      setReleaseError(error instanceof Error ? error.message : 'Could not load the Windows Agent release.');
+    } finally {
+      setLoadingRelease(false);
+    }
+  }, []);
 
   // Generate pairing code
   const handleGeneratePairingCode = async () => {
@@ -44,6 +65,10 @@ export const PrintAgentPage: React.FC = () => {
     handleGeneratePairingCode();
   }, []);
 
+  useEffect(() => {
+    void loadAgentRelease();
+  }, [loadAgentRelease]);
+
   // Countdown timer
   useEffect(() => {
     if (timeLeft <= 0) return;
@@ -63,6 +88,7 @@ export const PrintAgentPage: React.FC = () => {
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
+  const installerUrl = agentRelease ? getAgentInstallerUrl(API_BASE_URL) : undefined;
 
   const installSteps = [
     { num: 'Step 1', title: 'Download Agent', desc: 'Download the official Windows installer (.exe) to your shop counter PC.' },
@@ -88,14 +114,29 @@ export const PrintAgentPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex-shrink-0">
-          <a
-            href={`${API_BASE_URL}/admin/agents/download/latest`}
-            className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 hover:from-purple-500 hover:to-orange-400 text-white font-black text-xs shadow-xl shadow-purple-500/25 flex items-center space-x-2 transition-all transform active:scale-95"
-          >
-            <Download className="w-4 h-4" />
-            <span>Download Windows Agent (v1.0.0)</span>
-          </a>
+        <div className="flex flex-shrink-0 flex-col items-start gap-2">
+          {installerUrl ? (
+            <a
+              href={installerUrl}
+              className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 hover:from-purple-500 hover:to-orange-400 text-white font-black text-xs shadow-xl shadow-purple-500/25 flex items-center space-x-2 transition-all transform active:scale-95"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download Windows Agent (v{agentRelease?.latestVersion})</span>
+            </a>
+          ) : (
+            <button type="button" disabled className="px-6 py-3.5 rounded-2xl bg-slate-700 text-slate-300 font-black text-xs flex items-center space-x-2 cursor-not-allowed">
+              <Download className="w-4 h-4" />
+              <span>{loadingRelease ? 'Checking Agent release…' : 'Agent download unavailable'}</span>
+            </button>
+          )}
+          {releaseError && (
+            <div className="flex items-center gap-2 text-xs text-rose-300" role="alert" aria-live="polite">
+              <span>{releaseError}</span>
+              <button type="button" onClick={() => void loadAgentRelease()} disabled={loadingRelease} className="underline font-bold disabled:opacity-50">
+                Retry
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -179,13 +220,16 @@ export const PrintAgentPage: React.FC = () => {
             <div>
               Compatible with <strong className="text-white">Windows 10 / 11 (64-bit)</strong> and all standard printer drivers.
             </div>
-            <a
-              href={`${API_BASE_URL}/admin/agents/download/latest`}
-              className="text-purple-400 hover:text-purple-300 font-bold flex items-center space-x-1"
-            >
-              <span>Download Agent Installer</span>
-              <Download className="w-3.5 h-3.5" />
-            </a>
+            {installerUrl ? (
+              <a href={installerUrl} className="text-purple-400 hover:text-purple-300 font-bold flex items-center space-x-1">
+                <span>Download Agent Installer (v{agentRelease?.latestVersion})</span>
+                <Download className="w-3.5 h-3.5" />
+              </a>
+            ) : (
+              <button type="button" onClick={() => void loadAgentRelease()} disabled={loadingRelease} className="text-purple-300 font-bold disabled:opacity-50">
+                {loadingRelease ? 'Checking release…' : 'Retry loading Agent release'}
+              </button>
+            )}
           </div>
         </div>
       </div>
