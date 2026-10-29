@@ -21,6 +21,7 @@ import { LegalPagesManagement } from './pages/LegalPagesManagement';
 import { CollegeFreePrintingPage } from './pages/CollegeFreePrintingPage';
 import { api, CUSTOMER_PORTAL_URL } from './lib/api';
 import { AdminTab, getAdminPathForTab, getAdminTabFromPath } from './lib/admin-navigation.mjs';
+import { readStoredAdminUser } from './lib/admin-session.mjs';
 import {
   Shield,
   LayoutDashboard,
@@ -50,8 +51,7 @@ import {
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<any>(() => {
-    const stored = localStorage.getItem('printqr_admin_user');
-    return stored ? JSON.parse(stored) : null;
+    return readStoredAdminUser();
   });
 
   const [activeTab, setActiveTab] = useState<AdminTab>(() => getAdminTabFromPath(window.location.pathname));
