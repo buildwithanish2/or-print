@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>AnishNovaInstaller</RootNamespace>
+    <AssemblyName>AnishNovaPrintAgent-Setup</AssemblyName>
+    <Version>1.0.0</Version>
+    <Description>AnishNova Print Agent Windows Installer</Description>
+    <Company>AnishNova Technologies</Company>
+    <Product>AnishNova Print Agent Setup</Product>
+    <Copyright>Copyright © AnishNova Technologies</Copyright>
+    <ApplicationIcon>assets\app.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="assets\app.ico" />
+    <EmbeddedResource Include="assets\app.ico" LogicalName="app.ico" />
+    <EmbeddedResource Include="..\PrintQRAgent\bin\Release\net8.0-windows\win-x64\publish\PrintQRAgent.exe" LogicalName="PrintQRAgent.exe" Condition="Exists('..\PrintQRAgent\bin\Release\net8.0-windows\win-x64\publish\PrintQRAgent.exe')" />
+  </ItemGroup>
+
+</Project>

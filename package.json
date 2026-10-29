@@ -1,0 +1,34 @@
+{
+  "name": "printqr-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-Ready QR Print SaaS Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n \"API,CUSTOMER,SHOP,ADMIN\" -c \"blue,green,magenta,cyan\" \"npm:dev:api\" \"npm:dev:customer\" \"npm:dev:shop\" \"npm:dev:admin\"",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:customer": "npm run dev --workspace=apps/customer-web",
+    "dev:shop": "npm run dev --workspace=apps/shop-dashboard",
+    "dev:admin": "npm run dev --workspace=apps/admin-web",
+    "build": "npm run build --workspaces --if-present",
+    "agent:build": "dotnet publish apps/print-agent/PrintQRAgent/PrintQRAgent.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true -o apps/api/public/downloads && dotnet publish apps/print-agent/AnishNovaInstaller/AnishNovaInstaller.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true -o apps/api/public/downloads",
+    "db:generate": "npm run generate --workspace=apps/api",
+    "db:push": "npm run db:push --workspace=apps/api",
+    "db:seed": "npm run db:seed --workspace=apps/api",
+    "type-check": "npm run type-check --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "printqr",
+    "qr-printing",
+    "saas",
+    "print-agent"
+  ],
+  "author": "PrintQR Platform Team",
+  "license": "MIT"
+}

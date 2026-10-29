@@ -1,0 +1,30 @@
+FROM node:20-alpine AS builder
+
+ARG APP_PATH
+ARG VITE_API_URL
+ARG VITE_SOCKET_URL
+ARG VITE_CUSTOMER_URL
+ARG VITE_SHOP_URL
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_SOCKET_URL=$VITE_SOCKET_URL
+ENV VITE_CUSTOMER_URL=$VITE_CUSTOMER_URL
+ENV VITE_SHOP_URL=$VITE_SHOP_URL
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY packages/ ./packages/
+COPY ${APP_PATH}/ ./${APP_PATH}/
+
+RUN npm install
+RUN npm run build --workspace=packages/types
+RUN npm run build --workspace=packages/config
+RUN npm run build --workspace=packages/validation
+RUN npm run build --workspace=${APP_PATH}
+
+FROM nginx:alpine AS runner
+ARG APP_PATH
+COPY --from=builder /app/${APP_PATH}/dist /usr/share/nginx/html
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

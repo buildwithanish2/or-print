@@ -1,0 +1,97 @@
+services:
+  # Backend REST API & Real-time WebSocket Gateway
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: printqr-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "file:/app/data/printqr.db"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}"
+      PAYMENT_CREDENTIALS_ENCRYPTION_KEY: "${PAYMENT_CREDENTIALS_ENCRYPTION_KEY:?Set PAYMENT_CREDENTIALS_ENCRYPTION_KEY in .env}"
+      COLLEGE_ID_HASH_SECRET: "${COLLEGE_ID_HASH_SECRET:?Set COLLEGE_ID_HASH_SECRET in .env}"
+      CORS_ORIGIN: "${CORS_ORIGIN:?Set CORS_ORIGIN to the HTTPS portal origins in .env}"
+      PUBLIC_API_URL: "${PUBLIC_API_URL:?Set PUBLIC_API_URL in .env}"
+      CUSTOMER_PORTAL_URL: "${CUSTOMER_PORTAL_URL:?Set CUSTOMER_PORTAL_URL in .env}"
+      SHOP_PORTAL_URL: "${SHOP_PORTAL_URL:?Set SHOP_PORTAL_URL in .env}"
+      ADMIN_PORTAL_URL: "${ADMIN_PORTAL_URL:?Set ADMIN_PORTAL_URL in .env}"
+      PORT: 5000
+      STORAGE_PROVIDER: "local"
+      UPLOAD_DIR: "/app/uploads"
+      COLLEGE_EVIDENCE_DIR: "/app/private-college-evidence"
+      RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID:-}"
+      RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
+      NODE_ENV: "production"
+    ports:
+      - "5000:5000"
+    volumes:
+      - upload_data:/app/uploads
+      - evidence_data:/app/private-college-evidence
+      - database_data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Customer Mobile Web App (/print/:slug & /track/:orderNumber)
+  customer-web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        APP_PATH: "apps/customer-web"
+        VITE_API_URL: "${VITE_API_URL:?Set VITE_API_URL in .env}"
+        VITE_SOCKET_URL: "${VITE_SOCKET_URL:?Set VITE_SOCKET_URL in .env}"
+        VITE_SHOP_URL: "${VITE_SHOP_URL:?Set VITE_SHOP_URL in .env}"
+    container_name: printqr-customer-web
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Shop Owner & Staff Print Station Dashboard
+  shop-dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        APP_PATH: "apps/shop-dashboard"
+        VITE_API_URL: "${VITE_API_URL:?Set VITE_API_URL in .env}"
+        VITE_SOCKET_URL: "${VITE_SOCKET_URL:?Set VITE_SOCKET_URL in .env}"
+        VITE_CUSTOMER_URL: "${VITE_CUSTOMER_URL:?Set VITE_CUSTOMER_URL in .env}"
+    container_name: printqr-shop-dashboard
+    restart: unless-stopped
+    ports:
+      - "5174:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Super Admin Platform Console
+  admin-web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        APP_PATH: "apps/admin-web"
+        VITE_API_URL: "${VITE_API_URL:?Set VITE_API_URL in .env}"
+        VITE_CUSTOMER_URL: "${VITE_CUSTOMER_URL:?Set VITE_CUSTOMER_URL in .env}"
+        VITE_SHOP_URL: "${VITE_SHOP_URL:?Set VITE_SHOP_URL in .env}"
+    container_name: printqr-admin-web
+    restart: unless-stopped
+    ports:
+      - "5175:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  upload_data:
+  evidence_data:
+  database_data:

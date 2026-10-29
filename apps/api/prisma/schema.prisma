@@ -1,0 +1,814 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String   @default("SHOP_OWNER") // SUPER_ADMIN, ADMIN, SUPPORT, FINANCE, SHOP_OWNER, SHOP_STAFF, CUSTOMER
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  emailVerifiedAt DateTime?
+  emailVerificationRequired Boolean @default(false)
+  sessionVersion Int @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedShops                     Shop[]                         @relation("ShopOwner")
+  staffMembers                   ShopStaff[]
+  auditLogs                      AuditLog[]
+  tickets                        SupportTicket[]
+  verification                   InstitutionVerification?
+  freePrintUsage                 FreePrintUsage[]
+  freePrintReservations          FreePrintReservation[]
+  institutionVerificationReviews InstitutionVerification[]      @relation("VerificationReviewer")
+  uploadedFileOwnerships         FileOwnership[]
+  guestVerificationReviews       GuestInstitutionVerification[] @relation("GuestVerificationReviewer")
+  authActionTokens               AuthActionToken[]
+}
+
+model AuthActionToken {
+  id        String   @id @default(uuid())
+  userId    String
+  purpose   String // EMAIL_VERIFY, PASSWORD_RESET
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, expiresAt])
+}
+
+model Shop {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  ownerId       String
+  email         String
+  phone         String
+  address       String
+  city          String
+  state         String
+  pin           String
+  gst           String?
+  logoUrl       String?
+  bannerUrl     String?
+  status        String   @default("ACTIVE") // PENDING_APPROVAL, ACTIVE, SUSPENDED, INACTIVE
+  isOnline      Boolean  @default(true)
+  startingPrice Float    @default(2.0)
+  businessHours String? // JSON string for opening/closing times
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  owner                         User                           @relation("ShopOwner", fields: [ownerId], references: [id])
+  staff                         ShopStaff[]
+  printers                      Printer[]
+  agents                        PrinterAgent[]
+  qrCodes                       QRCodeRecord[]
+  orders                        Order[]
+  files                         FileRecord[]
+  pricingRules                  PricingRule[]
+  services                      ServiceItem[]
+  subscriptions                 ShopSubscription[]
+  subscriptionPaymentAttempts   SubscriptionPaymentAttempt[]
+  coupons                       Coupon[]
+  gateways                      PaymentGatewayConfig[]
+  tickets                       SupportTicket[]
+  freePrintSettings             FreePrintShopSetting?
+  guestInstitutionVerifications GuestInstitutionVerification[]
+  guestVerificationReviews      GuestInstitutionVerification[] @relation("GuestVerificationShopReviewer")
+}
+
+model ShopStaff {
+  id          String   @id @default(uuid())
+  shopId      String
+  userId      String
+  role        String   @default("OPERATOR") // MANAGER, OPERATOR, CASHIER
+  permissions String   @default("orders.view,orders.manage,printing.view,printing.retry") // CSV of permissions
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, userId])
+}
+
+model Printer {
+  id               String    @id @default(uuid())
+  shopId           String
+  name             String
+  model            String
+  connectionType   String    @default("USB") // USB, NETWORK_IP, BLUETOOTH, SHARED_SPOOLER
+  status           String    @default("ONLINE") // ONLINE, OFFLINE, PRINTING, ERROR, PAUSED
+  isDefault        Boolean   @default(false)
+  supportsColor    Boolean   @default(true)
+  supportsDuplex   Boolean   @default(true)
+  supportedSizes   String    @default("A4,A3,A5,LETTER,LEGAL")
+  inkLevel         Int?      @default(90)
+  paperLevel       Int?      @default(85)
+  lastSeenAt       DateTime? @default(now())
+  totalJobsPrinted Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  shop      Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  printJobs PrintJob[]
+}
+
+model PrinterAgent {
+  id            String    @id @default(uuid())
+  shopId        String
+  pairingCode   String    @unique
+  agentToken    String    @unique
+  deviceName    String
+  ipAddress     String?
+  osVersion     String?
+  agentVersion  String?   @default("1.0.0")
+  status        String    @default("CONNECTED") // CONNECTED, DISCONNECTED
+  lastHeartbeat DateTime? @default(now())
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model QRCodeRecord {
+  id        String   @id @default(uuid())
+  shopId    String
+  code      String   @unique
+  targetUrl String
+  label     String?  @default("Scan to Print")
+  scanCount Int      @default(0)
+  qrDataUrl String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model FileRecord {
+  id           String   @id @default(uuid())
+  shopId       String?
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  pageCount    Int      @default(1)
+  category     String   @default("DOCUMENT")
+  storageKey   String
+  url          String
+  previewUrl   String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  shop                Shop?                         @relation(fields: [shopId], references: [id])
+  orderItems          OrderItem[]
+  ownership           FileOwnership?
+  guestVerificationId String?
+  guestVerification   GuestInstitutionVerification? @relation(fields: [guestVerificationId], references: [id], onDelete: SetNull)
+}
+
+model Order {
+  id              String    @id @default(uuid())
+  orderNumber     String    @unique
+  shopId          String
+  customerName    String?
+  customerPhone   String?
+  customerEmail   String?
+  guestSessionId  String?
+  idempotencyKey  String?   @unique
+  idempotencyHash String?
+  totalPages      Int       @default(1)
+  totalCopies     Int       @default(1)
+  subtotal        Float
+  taxAmount       Float     @default(0.0)
+  discountAmount  Float     @default(0.0)
+  serviceFee      Float     @default(2.0)
+  totalAmount     Float
+  paymentMethod   String    @default("UPI") // UPI, RAZORPAY_CARD, RAZORPAY_NETBANKING, PAY_AT_COUNTER
+  paymentStatus   String    @default("PENDING") // PENDING, PAID, FAILED, REFUNDED, CASH_ON_COUNTER
+  printStatus     String    @default("RECEIVED") // RECEIVED, PAYMENT_CONFIRMED, QUEUED, PROCESSING, PRINTING, COMPLETED, FAILED, CANCELLED
+  trackingToken   String    @unique
+  couponCode      String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt     DateTime?
+
+  shop                 Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items                OrderItem[]
+  printJobs            PrintJob[]
+  payments             Payment[]
+  freePrintReservation FreePrintReservation?
+}
+
+model OrderItem {
+  id                 String   @id @default(uuid())
+  orderId            String
+  fileId             String
+  colorMode          String   @default("BW") // BW, COLOR
+  paperSize          String   @default("A4") // A4, A3, A5, LETTER, LEGAL, CUSTOM
+  orientation        String   @default("PORTRAIT") // PORTRAIT, LANDSCAPE, AUTO
+  duplexMode         String   @default("SIMPLEX") // SIMPLEX, DUPLEX_LONG_EDGE, DUPLEX_SHORT_EDGE
+  copies             Int      @default(1)
+  pageRange          String   @default("ALL")
+  pagesPerSheet      Int      @default(1)
+  quality            String   @default("NORMAL")
+  selectedPagesCount Int      @default(1)
+  calculatedPrice    Float
+  createdAt          DateTime @default(now())
+
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  file      FileRecord @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  printJobs PrintJob[]
+}
+
+model FileOwnership {
+  id        String     @id @default(uuid())
+  fileId    String     @unique
+  userId    String
+  createdAt DateTime   @default(now())
+  file      FileRecord @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model PrintJob {
+  id              String    @id @default(uuid())
+  orderId         String
+  orderItemId     String
+  printerId       String
+  shopId          String
+  idempotencyKey  String    @unique
+  status          String    @default("QUEUED") // QUEUED, DOWNLOADING, SENT_TO_SPOOLER, PRINTING, COMPLETED, FAILED, RETRYING
+  progressPercent Int       @default(0)
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+  errorMessage    String?
+  spoolerJobId    Int?
+  createdAt       DateTime  @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  printer   Printer   @relation(fields: [printerId], references: [id], onDelete: Cascade)
+}
+
+model PricingRule {
+  id                    String   @id @default(uuid())
+  shopId                String? // null indicates global platform default
+  paperSize             String // A4, A3, A5, LETTER, LEGAL
+  colorMode             String // BW, COLOR
+  singleSidePrice       Float
+  duplexPrice           Float
+  duplexDiscountPercent Float    @default(0.0)
+  bulkMinPages          Int      @default(50)
+  bulkDiscountPercent   Float    @default(0.0)
+  isDefault             Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model ServiceItem {
+  id          String   @id @default(uuid())
+  shopId      String
+  code        String
+  name        String
+  description String?
+  price       Float    @default(0.0)
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id               String    @id @default(uuid())
+  orderId          String
+  amount           Float
+  gateway          String    @default("RAZORPAY") // RAZORPAY, CASHFREE, STRIPE, UPI_MANUAL, COUNTER_CASH
+  paymentMethod    String    @default("UPI")
+  status           String    @default("PENDING") // PENDING, AUTHORIZED, PAID, FAILED, REFUNDED
+  transactionRef   String?   @unique
+  gatewayOrderId   String?
+  rawResponse      String?
+  verifiedByUserId String?
+  verifiedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  paymentId   String
+  type        String   @default("PAYMENT") // PAYMENT, REFUND, SETTLEMENT, FEE
+  amount      Float
+  status      String   @default("SUCCESS")
+  description String?
+  createdAt   DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+model PaymentGatewayConfig {
+  id            String   @id @default(uuid())
+  shopId        String? // null indicates Platform Admin Gateway
+  provider      String // RAZORPAY, CASHFREE, STRIPE, PAYPAL, UPI
+  apiKey        String?
+  apiSecret     String?
+  webhookSecret String?
+  merchantId    String?
+  upiVpa        String?
+  isTestMode    Boolean  @default(true)
+  isEnabled     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model SubscriptionPlan {
+  id                String   @id @default(uuid())
+  name              String   @unique // Demo, Starter, Pro, Premium
+  description       String
+  priceMonthly      Float    @default(0.0)
+  priceYearly       Float    @default(0.0)
+  maxPrinters       Int      @default(1)
+  maxOrdersPerMonth Int      @default(50)
+  features          String // JSON string array
+  isPopular         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  shopSubscriptions ShopSubscription[]
+  paymentAttempts   SubscriptionPaymentAttempt[]
+}
+
+model SubscriptionPaymentAttempt {
+  id               String   @id @default(uuid())
+  planId           String
+  shopId           String?
+  gatewayOrderId   String   @unique
+  gatewayPaymentId String?  @unique
+  amountPaise      Int
+  currency         String   @default("INR")
+  status           String   @default("PENDING") // PENDING, PAID, FAILED, EXPIRED
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+  shop Shop?            @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  @@index([planId, status])
+  @@index([shopId, createdAt])
+}
+
+model ShopSubscription {
+  id                 String   @id @default(uuid())
+  shopId             String
+  planId             String
+  status             String   @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  currentPeriodStart DateTime @default(now())
+  currentPeriodEnd   DateTime
+  createdAt          DateTime @default(now())
+
+  shop Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+}
+
+model Coupon {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  discountType   String    @default("PERCENTAGE") // PERCENTAGE, FIXED
+  discountValue  Float
+  minOrderAmount Float     @default(0.0)
+  maxDiscount    Float?
+  shopId         String?
+  expiresAt      DateTime?
+  usageLimit     Int?
+  usedCount      Int       @default(0)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model AgentVersion {
+  id            String   @id @default(uuid())
+  version       String   @unique
+  platform      String   @default("windows-x64") // windows-x64, windows-arm64
+  filePath      String
+  fileSize      Int      @default(0)
+  releaseNotes  String?
+  downloadCount Int      @default(0)
+  isLatest      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Testimonial {
+  id           String   @id @default(uuid())
+  name         String
+  role         String
+  shopName     String
+  city         String
+  review       String
+  rating       Int      @default(5)
+  avatarUrl    String?
+  isApproved   Boolean  @default(true)
+  isFeatured   Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model DemoVideo {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  videoUrl    String
+  provider    String   @default("YOUTUBE") // YOUTUBE, VIMEO, DIRECT
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PlatformSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Institution {
+  id                 String                         @id @default(uuid())
+  name               String                         @unique
+  domain             String?
+  isEligible         Boolean                        @default(true)
+  isActive           Boolean                        @default(true)
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  verifications      InstitutionVerification[]
+  guestVerifications GuestInstitutionVerification[]
+}
+
+model InstitutionVerification {
+  id                 String                         @id @default(uuid())
+  userId             String                         @unique
+  institutionId      String
+  requestedRole      String
+  status             String                         @default("PENDING") // PENDING, APPROVED, REJECTED, REVOKED
+  evidenceStorageKey String?
+  evidenceMimeType   String
+  evidenceSizeBytes  Int
+  submittedAt        DateTime                       @default(now())
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  rejectionReason    String?
+  active             Boolean                        @default(false)
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  user               User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution        Institution                    @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  reviewer           User?                          @relation("VerificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  history            InstitutionVerificationEvent[]
+
+  @@index([status, submittedAt])
+  @@index([institutionId, status])
+}
+
+model InstitutionVerificationEvent {
+  id             String                  @id @default(uuid())
+  verificationId String
+  actorUserId    String
+  action         String
+  reason         String?
+  createdAt      DateTime                @default(now())
+  verification   InstitutionVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@index([verificationId, createdAt])
+}
+
+model GuestInstitutionVerification {
+  id                 String                              @id @default(uuid())
+  shopId             String
+  institutionId      String
+  requestedRole      String
+  applicantName      String
+  status             String                              @default("PENDING") // PENDING, APPROVED, REJECTED, REVOKED, EXPIRED
+  evidenceStorageKey String
+  evidenceMimeType   String
+  evidenceSizeBytes  Int
+  accessTokenHash    String                              @unique
+  identityHash       String?
+  submittedAt        DateTime                            @default(now())
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  reviewerShopId     String?
+  rejectionReason    String?
+  active             Boolean                             @default(false)
+  createdAt          DateTime                            @default(now())
+  updatedAt          DateTime                            @updatedAt
+  shop               Shop                                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  institution        Institution                         @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  reviewer           User?                               @relation("GuestVerificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reviewerShop       Shop?                               @relation("GuestVerificationShopReviewer", fields: [reviewerShopId], references: [id], onDelete: SetNull)
+  files              FileRecord[]
+  reservations       FreePrintReservation[]
+  history            GuestInstitutionVerificationEvent[]
+
+  @@unique([identityHash, shopId])
+  @@index([shopId, status, submittedAt])
+  @@index([institutionId, status])
+}
+
+model GuestInstitutionVerificationEvent {
+  id             String                       @id @default(uuid())
+  verificationId String
+  actorUserId    String?
+  action         String
+  reason         String?
+  createdAt      DateTime                     @default(now())
+  verification   GuestInstitutionVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@index([verificationId, createdAt])
+}
+
+model FreePrintPolicy {
+  id                   String    @id @default("global")
+  enabled              Boolean   @default(false)
+  studentDailyPages    Int       @default(0)
+  studentMonthlyPages  Int       @default(0)
+  teacherDailyPages    Int       @default(0)
+  teacherMonthlyPages  Int       @default(0)
+  studentDailyCopies   Int       @default(0)
+  studentMonthlyCopies Int       @default(0)
+  teacherDailyCopies   Int       @default(0)
+  teacherMonthlyCopies Int       @default(0)
+  allowBlackWhite      Boolean   @default(true)
+  allowColor           Boolean   @default(false)
+  startsAt             DateTime?
+  expiresAt            DateTime?
+  updatedByUserId      String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+model FreePrintShopSetting {
+  id              String   @id @default(uuid())
+  shopId          String   @unique
+  participating   Boolean  @default(false)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model FreePrintPolicyAudit {
+  id          String   @id @default(uuid())
+  actorUserId String
+  scope       String
+  scopeId     String?
+  action      String
+  beforeJson  String?
+  afterJson   String?
+  createdAt   DateTime @default(now())
+
+  @@index([scope, createdAt])
+}
+
+model FreePrintUsage {
+  id                String   @id @default(uuid())
+  userId            String?
+  guestIdentityHash String?
+  periodType        String // DAY, MONTH
+  periodKey         String // calendar boundary: Asia/Kolkata
+  reservedPages     Int      @default(0)
+  completedPages    Int      @default(0)
+  reservedCopies    Int      @default(0)
+  completedCopies   Int      @default(0)
+  updatedAt         DateTime @updatedAt
+  user              User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodType, periodKey])
+  @@unique([guestIdentityHash, periodType, periodKey])
+  @@index([periodKey, periodType])
+}
+
+model FreePrintReservation {
+  id                  String                        @id @default(uuid())
+  orderId             String                        @unique
+  userId              String?
+  guestIdentityHash   String?
+  guestVerificationId String?
+  pages               Int
+  copies              Int
+  dayKey              String
+  monthKey            String
+  status              String                        @default("RESERVED") // RESERVED, COMPLETED, RELEASED
+  policySnapshot      String
+  createdAt           DateTime                      @default(now())
+  completedAt         DateTime?
+  releasedAt          DateTime?
+  order               Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user                User?                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestVerification   GuestInstitutionVerification? @relation(fields: [guestVerificationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, dayKey, status])
+  @@index([userId, monthKey, status])
+}
+
+model NavigationItem {
+  id           String   @id @default(uuid())
+  label        String
+  path         String
+  isExternal   Boolean  @default(false)
+  openInNewTab Boolean  @default(false)
+  displayOrder Int      @default(0)
+  isEnabled    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model HomepageBanner {
+  id           String   @id @default(uuid())
+  title        String
+  subtitle     String?
+  ctaText      String?
+  ctaUrl       String?
+  bgGradient   String?  @default("from-purple-900/80 via-pink-900/60 to-slate-900")
+  imageUrl     String?
+  displayOrder Int      @default(0)
+  isEnabled    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ContactInquiry {
+  id          String   @id @default(uuid())
+  leadNumber  String   @default("LEAD-2026-000000")
+  name        String
+  email       String
+  phone       String?
+  shopName    String?
+  city        String?
+  subject     String?  @default("Website Enquiry")
+  message     String
+  type        String   @default("CONTACT") // CONTACT, PARTNER, SHOP_REGISTRATION, SUPPORT
+  priority    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status      String   @default("NEW") // NEW, CONTACTED, IN_PROGRESS, FOLLOW_UP, CONVERTED, CLOSED, SPAM
+  assignedTo  String?
+  notes       String? // JSON array of note objects: [{text, author, date}]
+  source      String?  @default("Website Contact")
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+}
+
+model PartnerApplication {
+  id            String   @id @default(uuid())
+  partnerNumber String   @default("PARTNER-2026-000000")
+  name          String
+  email         String
+  phone         String
+  city          String
+  state         String?
+  businessName  String?
+  businessType  String   @default("XEROX_CHAIN") // XEROX_CHAIN, UNIVERSITY_CAMPUS, INDEPENDENT_STORE, DISTRIBUTOR
+  printerCount  Int?     @default(2)
+  monthlyVolume String?  @default("500-2000")
+  message       String?
+  priority      String   @default("MEDIUM")
+  status        String   @default("NEW") // NEW, CONTACTED, INTERESTED, ONBOARDING, ACTIVE, REJECTED, CLOSED
+  assignedTo    String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+}
+
+model ShopRegistrationLead {
+  id           String   @id @default(uuid())
+  leadNumber   String   @default("SHOP-2026-000000")
+  shopName     String?
+  ownerName    String?
+  email        String?
+  phone        String?
+  city         String?
+  selectedPlan String?
+  step         String   @default("STARTED") // STARTED, DETAILS_ENTERED, PLAN_SELECTED, PAYMENT_PENDING, COMPLETED, ABANDONED
+  status       String   @default("NEW") // NEW, CONTACTED, CONVERTED, ABANDONED
+  assignedTo   String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+}
+
+model SupportTicket {
+  id           String   @id @default(uuid())
+  ticketNumber String   @default("TICKET-2026-000000")
+  shopId       String?
+  userId       String?
+  category     String   @default("OTHER") // PAYMENT, PRINTER, WINDOWS_AGENT, QR_CODE, SHOP_ACCOUNT, PRICING, ORDER, UPI, OTHER
+  subject      String
+  description  String
+  priority     String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status       String   @default("OPEN") // OPEN, IN_PROGRESS, WAITING_FOR_CUSTOMER, RESOLVED, CLOSED
+  assignedTo   String?
+  notes        String? // Internal admin notes JSON
+  attachments  String? // JSON array of file URLs
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model AdminNotification {
+  id          String   @id @default(uuid())
+  type        String // LEAD, PARTNER, SHOP_REGISTRATION, SUPPORT, PAYMENT
+  title       String
+  message     String
+  referenceId String?
+  link        String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String?
+  shopId    String?
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, SUCCESS, WARNING, ERROR
+  channel   String   @default("IN_APP") // IN_APP, EMAIL, WHATSAPP, SMS
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   @default("INFO") // DEBUG, INFO, WARN, ERROR
+  source    String
+  message   String
+  metadata  String?
+  createdAt DateTime @default(now())
+}
+
+model LegalPage {
+  id              String   @id @default(uuid())
+  slug            String   @unique
+  title           String
+  content         String
+  metaTitle       String?
+  metaDescription String?
+  status          String   @default("PUBLISHED") // DRAFT, PUBLISHED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model WebsiteSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  category  String   @default("GENERAL")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
