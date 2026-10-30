@@ -178,6 +178,7 @@ export const App: React.FC = () => {
                   <button
                     key={item.id}
                     type="button"
+                    aria-current={isActive ? 'page' : undefined}
                     onClick={() => {
                       navigateToTab(item.id as AdminTab);
                       setMobileMenuOpen(false);

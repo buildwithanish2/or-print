@@ -17,6 +17,7 @@ import { CollegeFreePrintingPage } from './pages/CollegeFreePrintingPage';
 import { ShopAccountActionPage } from './pages/ShopAccountActionPage';
 import { CUSTOMER_PORTAL_URL } from './lib/api';
 import { buildCustomerPrintUrl } from './lib/customer-portal-url.js';
+import { ShopDashboardTab, getShopPathForTab, getShopTabFromPath } from './lib/shop-navigation.mjs';
 import {
   LayoutDashboard,
   Clock,
@@ -48,22 +49,7 @@ export const App: React.FC = () => {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const [activeTab, setActiveTab] = useState<
-    | 'overview'
-    | 'queue'
-    | 'orders'
-    | 'printers'
-    | 'qr'
-    | 'agent'
-    | 'pricing'
-    | 'staff'
-    | 'payments'
-    | 'services'
-    | 'analytics'
-    | 'settings'
-    | 'support'
-    | 'college-free-printing'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<ShopDashboardTab>(() => getShopTabFromPath(window.location.pathname));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const customerPortalUrl = buildCustomerPrintUrl(CUSTOMER_PORTAL_URL, shop?.slug, import.meta.env.PROD);
 
@@ -75,6 +61,18 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    const restoreTabFromHistory = () => setActiveTab(getShopTabFromPath(window.location.pathname));
+    window.addEventListener('popstate', restoreTabFromHistory);
+    return () => window.removeEventListener('popstate', restoreTabFromHistory);
+  }, []);
+
+  const navigateToTab = (tab: ShopDashboardTab) => {
+    const path = getShopPathForTab(tab);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+    setActiveTab(tab);
+  };
 
   const actionPath = window.location.pathname;
   if (actionPath === '/verify-email') return <ShopAccountActionPage mode="verify" />;
@@ -157,8 +155,9 @@ export const App: React.FC = () => {
                   <button
                     key={item.id}
                     type="button"
+                    aria-current={isActive ? 'page' : undefined}
                     onClick={() => {
-                      setActiveTab(item.id as any);
+                      navigateToTab(item.id as ShopDashboardTab);
                       setMobileMenuOpen(false);
                     }}
                     className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors ${

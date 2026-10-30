@@ -175,3 +175,46 @@ Not verified in this environment: exact pixel measurements, production shop/orde
 - Shop Dashboard tests: 11 passed; type check and production build passed after adding the narrow-screen drawer behavior.
 - Admin Web tests: 10 passed; type check and production build passed after adding the narrow-screen drawer behavior.
 - The source changes intentionally do not claim visual parity for reference products that PrintQ does not implement. No production deployment was performed.
+
+### Authenticated dashboard audit (2026-10-30)
+
+Authenticated screens were reviewed in an isolated local test environment with a scratch SQLite database and synthetic accounts. No production credentials or records were used. Screenshots below are fresh local captures; overview pages were captured at all three requested sizes. Operational detail pages were captured at desktop size. The authenticated portals have no matching pages on the public reference site, so this is a usability/responsiveness audit rather than a pixel-match claim.
+
+#### Screenshots
+
+| Portal / screen | 1440×900 | 768×1024 | 390×844 |
+| --- | --- | --- | --- |
+| Shop overview | [desktop](audit-evidence/dashboard/shop-overview-1440x900.png) | [tablet](audit-evidence/dashboard/shop-overview-768x1024.png) | [mobile](audit-evidence/dashboard/shop-overview-390x844.png) |
+| Admin overview | [desktop](audit-evidence/dashboard/admin-overview-1440x900.png) | [tablet](audit-evidence/dashboard/admin-overview-768x1024.png) | [mobile](audit-evidence/dashboard/admin-overview-390x844.png) |
+| Shop orders | [desktop](audit-evidence/dashboard/shop-orders-1440x900.png) | Not captured | Not captured |
+| Shop live queue | [desktop](audit-evidence/dashboard/shop-queue-1440x900.png) | Not captured | Not captured |
+| Shop printers | [desktop](audit-evidence/dashboard/shop-printers-1440x900.png) | Not captured | Not captured |
+| Shop pricing | [desktop](audit-evidence/dashboard/shop-pricing-1440x900.png) | Not captured | Not captured |
+| Shop payment settings | [desktop](audit-evidence/dashboard/shop-payments-1440x900.png) | Not captured | Not captured |
+| Shop settings/profile | [desktop](audit-evidence/dashboard/shop-settings-1440x900.png) | Not captured | Not captured |
+| Admin shops | [desktop](audit-evidence/dashboard/admin-shops-1440x900.png) | Not captured | Not captured |
+| Admin plans | [desktop](audit-evidence/dashboard/admin-plans-1440x900.png) | Not captured | Not captured |
+| Admin pricing | [desktop](audit-evidence/dashboard/admin-pricing-1440x900.png) | Not captured | Not captured |
+| Admin reports/statistics | [desktop](audit-evidence/dashboard/admin-statistics-1440x900.png) | Not captured | Not captured |
+| Admin navigation | [desktop](audit-evidence/dashboard/admin-navigation-1440x900.png) | Not captured | Not captured |
+| Shop mobile navigation drawer | Not captured | Not captured | [mobile](audit-evidence/dashboard/shop-mobile-navigation-390x844.png) |
+
+The local agent page was exercised but its screenshot was intentionally discarded because it contained a temporary pairing code. Its release endpoint is not configured in the isolated sandbox, and the UI showed an unavailable state. No pairing code or account secret is retained in the evidence.
+
+#### Reviewed navigation and findings
+
+- **Shop Dashboard:** login screen; overview; orders; live print queue; printer management; print agent; pricing/rates; payment settings; shop settings/profile; mobile navigation drawer. Shop navigation previously changed only React component state. The browser path stayed unchanged, refresh returned to overview, and browser back/forward could not restore a selected section. It now maps sections to paths, initializes from the current pathname, updates history, listens for `popstate`, and marks the current button with `aria-current="page"`. A sandbox click-through verified that selecting Orders changes the route to `/orders`.
+- **Admin Panel:** login screen; platform overview; shops; plans; global pricing; website statistics/reports; website navigation. The existing application does not expose standalone Users, Orders, or general Settings sections in the Admin sidebar; recent orders are shown within the overview and shop-specific staff management is separate. No new screens or permission/API surface was invented as part of this audit.
+- Both overviews previously caught API failures but left users stuck on a loading message because missing data shared the loading branch. They now distinguish loading from failure and provide an explicit retry action with an accessible alert. This preserves existing API calls and permissions.
+- Shop overview displayed a fixed `+18.4%` revenue change independent of returned data. Removed the unsupported metric rather than presenting fabricated performance.
+- Admin audit rows substituted `127.0.0.1` for missing client IP data. Replaced it with `IP unavailable`, avoiding false telemetry.
+- Shop and Admin mobile overview layouts collapsed to a single column at 390px and tablet sizes. Shop's drawer and overview were captured at mobile; authenticated detail pages were not exhaustively captured at tablet/mobile widths. Detail-page table and form behavior at those widths remains to be reviewed with screenshot comparisons.
+
+#### Tests and scope limits
+
+- Shop Dashboard: `npm test --workspace=apps/shop-dashboard` — 14 passed, including new route mapping tests for direct paths, trailing slash normalization, unknown paths, and path generation.
+- Admin Web: `npm test --workspace=apps/admin-web` — 10 passed.
+- Both affected apps passed their individual type checks and production builds after the fixes.
+- The sandbox used synthetic local accounts and a scratch database; no order, payment, shop, or production setting was changed. Production login, live API data, cross-shop authorization, real payment and physical printing were not tested.
+- Screenshots show the post-fix local UI. The original authenticated reference site has no equivalent shop/admin screens. These captures therefore document PrintQ's responsive behavior and states, not reference parity.
+- Existing worktree README modification predates this audit stage and remains unrelated and uncommitted.
