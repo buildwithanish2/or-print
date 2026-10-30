@@ -164,6 +164,105 @@ public sealed class AgentConnectionTests
         Assert.True(activated.Wait(TimeSpan.FromSeconds(3)));
     }
 
+    [Fact]
+    public void PrinterDiscoverySelectionPreservesTheSavedPhysicalPrinter()
+    {
+        var printers = new[]
+        {
+            Printer("Shop printer", isDefault: false),
+            Printer("Other printer", isDefault: true)
+        };
+
+        Assert.Equal("Shop printer", PrintSpoolerService.SelectPhysicalPrinter(printers, "Shop printer")?.Name);
+    }
+
+    [Fact]
+    public void PrinterSelectionUsesOnlyOnePhysicalPrinterOrTheDefaultWhenAmbiguous()
+    {
+        var one = new[] { Printer("Only physical printer", false), VirtualPrinter("Microsoft Print to PDF", true) };
+        Assert.Equal("Only physical printer", PrintSpoolerService.SelectPhysicalPrinter(one, null)?.Name);
+
+        var multipleWithoutDefault = new[] { Printer("Printer A", false), Printer("Printer B", false) };
+        Assert.Null(PrintSpoolerService.SelectPhysicalPrinter(multipleWithoutDefault, null));
+
+        var withDefault = new[] { Printer("Printer A", false), Printer("Printer B", true) };
+        Assert.Equal("Printer B", PrintSpoolerService.SelectPhysicalPrinter(withDefault, null)?.Name);
+    }
+
+    [Fact]
+    public void UnavailableSavedPrinterDoesNotSilentlyFailOverToAnotherPrinter()
+    {
+        var printers = new[] { Printer("Saved but offline", false, available: false), Printer("Default", true) };
+        Assert.Null(PrintSpoolerService.SelectPhysicalPrinter(printers, "Saved but offline"));
+    }
+
+    [Fact]
+    public void PrinterDiscoveryDoesNotInventInkOrPaperTelemetry()
+    {
+        var printer = Printer("Generic printer", true);
+        Assert.Null(printer.InkLevel);
+        Assert.Null(printer.PaperLevel);
+    }
+
+    [Theory]
+    [InlineData("Microsoft Print to PDF", "Microsoft Print To PDF", "PORTPROMPT:")]
+    [InlineData("OneNote", "Microsoft OneNote Driver", "nul:")]
+    [InlineData("Warehouse device", "Universal Windows Driver", "USB001")]
+    public void VirtualPrinterDetectionUsesWindowsVirtualPortAndDriverClues(string name, string driver, string port)
+    {
+        Assert.Equal(name != "Warehouse device", PrintSpoolerService.IsVirtualPrinter(name, driver, port));
+    }
+
+    [Theory]
+    [InlineData("USB001", false, false, "USB")]
+    [InlineData("WSD-7f3a", false, false, "NETWORK_IP")]
+    [InlineData("\\\\PRINT-SERVER\\Office", false, false, "NETWORK_IP")]
+    [InlineData("Ne01:", true, false, "NETWORK_IP")]
+    [InlineData("Ne01:", false, true, "SHARED_SPOOLER")]
+    public void PrinterConnectionClassificationCoversUsbNetworkAndSharedPorts(string port, bool network, bool shared, string expected)
+    {
+        Assert.Equal(expected, PrintSpoolerService.ClassifyConnectionType(port, network, shared));
+    }
+
+    [Fact]
+    public void WindowsPrinterDiscoveryDoesNotReturnDuplicateNamesOrFakeSupplyLevels()
+    {
+        var printers = new PrintSpoolerService().GetInstalledPrinters();
+        Assert.Equal(printers.Count, printers.Select(printer => printer.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(printers, printer =>
+        {
+            Assert.Null(printer.InkLevel);
+            Assert.Null(printer.PaperLevel);
+        });
+    }
+
+    [Fact]
+    public void RequiredAuthenticodeRejectsAnUnsignedTestAssembly()
+    {
+        var isTrusted = AuthenticodeVerifier.IsTrusted(typeof(AgentConnectionTests).Assembly.Location,
+            "AnishNova Technologies", out var reason);
+        Assert.False(isTrusted);
+        Assert.NotEmpty(reason);
+    }
+
+    private static DiscoveredPrinter Printer(string name, bool isDefault, bool available = true) => new()
+    {
+        Name = name,
+        IsDefault = isDefault,
+        IsAvailable = available,
+        IsVirtual = false,
+        Status = available ? "ONLINE" : "OFFLINE"
+    };
+
+    private static DiscoveredPrinter VirtualPrinter(string name, bool isDefault) => new()
+    {
+        Name = name,
+        IsDefault = isDefault,
+        IsVirtual = true,
+        IsAvailable = true,
+        Status = "ONLINE"
+    };
+
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json")

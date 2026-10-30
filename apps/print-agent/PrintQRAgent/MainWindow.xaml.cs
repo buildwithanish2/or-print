@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using PrintQRAgent.Models;
 using PrintQRAgent.Services;
 using MessageBox = System.Windows.MessageBox;
@@ -23,6 +24,7 @@ namespace PrintQRAgent
         private bool _isMasked = true;
         private bool _backgroundServicesStarted;
         private bool _allowClose;
+        private readonly DispatcherTimer _printerRefreshTimer = new() { Interval = TimeSpan.FromMinutes(1) };
 
         public MainWindow()
         {
@@ -71,6 +73,7 @@ namespace PrintQRAgent
 
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
+            _printerRefreshTimer.Tick += (_, _) => _ = RefreshPrintersAndSyncAsync();
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -91,9 +94,11 @@ namespace PrintQRAgent
                 ShopInfoText.Text = "Status: Waiting for shop pairing code...";
             }
 
-            VersionBadgeText.Text = $"v{UpdateService.CurrentVersion} (Stable)";
+            VersionBadgeText.Text = $"v{UpdateService.CurrentVersion} (Installed)";
 
             RefreshPrinters();
+            _printerRefreshTimer.Start();
+            _ = _wsService.SyncPrintersAsync();
             _wsService.Start();
 
             // Background update check on startup (non-blocking)
@@ -177,21 +182,27 @@ namespace PrintQRAgent
             try
             {
                 var printers = _spoolerService.GetInstalledPrinters();
+                var physicalPrinters = printers.Where(printer => printer.IsPhysical).ToList();
+                var selected = PrintSpoolerService.SelectPhysicalPrinter(physicalPrinters, App.Config.SelectedPrinterName);
                 PrintersComboBox.ItemsSource = printers;
+                PrintersComboBox.SelectedItem = selected;
 
-                var defaultPrinter = printers.FirstOrDefault(p => p.IsDefault) ?? printers.FirstOrDefault();
-                if (defaultPrinter != null)
+                if (selected != null)
                 {
-                    PrintersComboBox.SelectedItem = defaultPrinter;
-                    App.Config.SelectedPrinterName = defaultPrinter.Name;
-                    PrinterCapabilitiesText.Text = $"Selected: {defaultPrinter.Name} {(defaultPrinter.IsDefault ? "(Default)" : "")} • Ready for Spooling";
+                    App.Config.SelectedPrinterName = selected.Name;
+                    PrinterCapabilitiesText.Text = "Selected: " + selected.Name + (selected.IsDefault ? " (Windows default)" : "") + " · " + selected.ConnectionType + " · " + selected.StatusBadge;
+                    App.SaveConfig();
                 }
                 else
                 {
-                    PrinterCapabilitiesText.Text = "No physical printers found. Please ensure Windows printer is connected.";
+                    var saved = App.Config.SelectedPrinterName;
+                    PrinterCapabilitiesText.Text = !string.IsNullOrWhiteSpace(saved)
+                        ? "Saved printer '" + saved + "' is unavailable. Check the shop printer assignment before selecting another device."
+                        : physicalPrinters.Count == 0
+                            ? "No physical printers are installed. Virtual printers are excluded from customer orders. Install a Windows/manufacturer driver, then rescan."
+                            : "Multiple physical printers are available. Select the intended shop printer; no Windows default is configured.";
                 }
 
-                _ = _wsService.SyncPrintersAsync();
             }
             catch (Exception ex)
             {
@@ -199,18 +210,44 @@ namespace PrintQRAgent
             }
         }
 
-        private void RefreshPrinters_Click(object sender, RoutedEventArgs e)
+        private async void RefreshPrinters_Click(object sender, RoutedEventArgs e)
+        {
+            RescanBtn.IsEnabled = false;
+            RescanBtn.Content = "Rescanning...";
+            try
+            {
+                var synced = await RefreshPrintersAndSyncAsync();
+                MessageBox.Show(synced
+                    ? "Windows printer discovery completed and available physical printers were synced to this shop."
+                    : "Windows discovery completed, but printer sync did not succeed. Check the agent's API connection and shop pairing, then retry.",
+                    "Printer rescan", synced ? MessageBoxButton.OK : MessageBoxButton.OK, synced ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+            finally
+            {
+                RescanBtn.IsEnabled = true;
+                RescanBtn.Content = "↻ Rescan Printers";
+            }
+        }
+
+        public async Task<bool> RefreshPrintersAndSyncAsync()
         {
             RefreshPrinters();
-            MessageBox.Show("Windows printer rescan completed. Printers synced to cloud spooler.", "Rescan Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            return await _wsService.SyncPrintersAsync();
         }
 
         private void PrintersComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (PrintersComboBox.SelectedItem is DiscoveredPrinter selected)
             {
+                if (selected.IsVirtual || !selected.IsAvailable)
+                {
+                    PrintersComboBox.SelectedItem = PrintersComboBox.Items.Cast<DiscoveredPrinter>()
+                        .FirstOrDefault(printer => string.Equals(printer.Name, App.Config.SelectedPrinterName, StringComparison.OrdinalIgnoreCase));
+                    MessageBox.Show(selected.ErrorState ?? "Choose an available physical printer for customer orders.", "Printer unavailable", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
                 App.Config.SelectedPrinterName = selected.Name;
-                PrinterCapabilitiesText.Text = $"Selected: {selected.Name} {(selected.IsDefault ? "(Default)" : "")} • Ready for Spooling";
+                PrinterCapabilitiesText.Text = "Selected: " + selected.Name + (selected.IsDefault ? " (Windows default)" : "") + " · " + selected.ConnectionType + " · " + selected.StatusBadge;
                 App.SaveConfig();
             }
         }
@@ -235,6 +272,7 @@ namespace PrintQRAgent
                     App.Config.ShopName = shopName;
                     ShopInfoText.Text = $"✓ Paired with: {shopName ?? "Shop"}";
                     RefreshPrinters();
+                    _ = await _wsService.SyncPrintersAsync();
 
                     MessageBox.Show(
                         $"{msg}\n\nAll Windows printers have been detected and registered.\nThe window will now minimize to the System Tray to handle background printing.",
@@ -350,6 +388,9 @@ namespace PrintQRAgent
                     return;
                 }
 
+                if (MessageBox.Show("Send one diagnostic page to '" + selectedPrinter + "'? This is a real print and may use paper and ink.", "Confirm diagnostic test print", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    return;
+
                 var orderNumber = $"TEST-{new Random().Next(1000, 9999)}";
                 var sampleJob = new PrintJobPayload
                 {
@@ -452,6 +493,7 @@ namespace PrintQRAgent
             }
             else
             {
+                _printerRefreshTimer.Stop();
                 _wsService.Stop();
             }
         }

@@ -13,10 +13,10 @@ namespace PrintQRAgent.Services
     public class UpdateManifest
     {
         [JsonPropertyName("latestVersion")]
-        public string LatestVersion { get; set; } = "1.0.2";
+        public string LatestVersion { get; set; } = string.Empty;
 
         [JsonPropertyName("minimumSupportedVersion")]
-        public string MinimumSupportedVersion { get; set; } = "1.0.2";
+        public string MinimumSupportedVersion { get; set; } = string.Empty;
 
         [JsonPropertyName("mandatory")]
         public bool Mandatory { get; set; }
@@ -38,6 +38,9 @@ namespace PrintQRAgent.Services
 
         [JsonPropertyName("fileSize")]
         public long FileSize { get; set; }
+
+        [JsonPropertyName("signatureRequired")]
+        public bool SignatureRequired { get; set; }
     }
 
     public class UpdateCheckResult
@@ -50,7 +53,7 @@ namespace PrintQRAgent.Services
 
     public class UpdateService
     {
-        public static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.2";
+        public static string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(60) };
 
         public static string ValidateDownloadUrl(string downloadUrl, string configuredApiUrl)
@@ -231,6 +234,13 @@ namespace PrintQRAgent.Services
                         File.Delete(stagedExePath);
                         return (false, "Downloaded update failed its integrity check.");
                     }
+                }
+
+                if (manifest.SignatureRequired
+                    && !AuthenticodeVerifier.IsTrusted(stagedExePath, "AnishNova Technologies", out var signatureError))
+                {
+                    File.Delete(stagedExePath);
+                    return (false, signatureError);
                 }
 
                 await using (var stagedStream = File.OpenRead(stagedExePath))

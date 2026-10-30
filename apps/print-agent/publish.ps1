@@ -1,6 +1,7 @@
 param(
-  [string]$Version = "1.0.2",
-  [string]$OutputDirectory = "apps/api/public/downloads"
+  [string]$Version = "1.0.3",
+  [string]$OutputDirectory = "apps/api/public/downloads",
+  [switch]$RequireSignature
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,40 @@ function Get-Sha256([string]$FilePath) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
   try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
   finally { $stream.Dispose(); $sha.Dispose() }
+}
+
+$certificatePath = $null
+try {
+$certificateBase64 = $env:WINDOWS_SIGNING_CERT_BASE64
+$certificatePassword = $env:WINDOWS_SIGNING_CERT_PASSWORD
+$hasCertificate = ![string]::IsNullOrWhiteSpace($certificateBase64) -and ![string]::IsNullOrWhiteSpace($certificatePassword)
+if ($RequireSignature -and !$hasCertificate) {
+  throw "This release requires a signing certificate. Configure the protected WINDOWS_SIGNING_CERT_BASE64 and WINDOWS_SIGNING_CERT_PASSWORD release secrets."
+}
+if ((! [string]::IsNullOrWhiteSpace($certificateBase64)) -xor (! [string]::IsNullOrWhiteSpace($certificatePassword))) {
+  throw "Both protected signing-certificate release secrets must be configured together."
+}
+$signatureRequired = [bool]$hasCertificate
+if ($signatureRequired) {
+  $sdkRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+  $signTool = Get-Command signtool.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+  if (!$signTool -and (Test-Path $sdkRoot)) {
+    $signTool = Get-ChildItem -Path $sdkRoot -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+  }
+  if (!$signTool) { throw "Windows SDK signtool.exe is required to sign release artifacts." }
+  $certificatePath = Join-Path ([System.IO.Path]::GetTempPath()) ("anishnova-signing-" + [guid]::NewGuid().ToString("N") + ".pfx")
+  [System.IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($certificateBase64))
+}
+
+function Sign-ReleaseArtifact([string]$Path) {
+  if (!$signatureRequired) { return }
+  & $signTool sign /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 /f $certificatePath /p $certificatePassword $Path | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $([System.IO.Path]::GetFileName($Path))." }
+  $authenticode = Get-AuthenticodeSignature -LiteralPath $Path
+  if ($authenticode.Status -ne "Valid" -or !$authenticode.SignerCertificate.Subject.Contains("AnishNova Technologies", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Windows did not validate the release signature and expected publisher for $([System.IO.Path]::GetFileName($Path))."
+  }
 }
 
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
@@ -29,15 +64,17 @@ $publishArgs = @("publish", $agentProject, "-c", "Release", "-r", "win-x64", "--
 & dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) { throw "Windows print agent publish failed with exit code $LASTEXITCODE." }
 if (!(Test-Path -LiteralPath $agentPublish)) { throw "The published print agent payload is missing." }
+Sign-ReleaseArtifact $agentPublish
 $agentHash = Get-Sha256 $agentPublish
 
-$installerArgs = @("publish", $installerProject, "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true", "-p:EnableCompressionInSingleFile=true", "-p:Version=$Version", "-p:AgentPayloadSha256=$agentHash", "-o", $output)
+$installerArgs = @("publish", $installerProject, "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true", "-p:EnableCompressionInSingleFile=true", "-p:Version=$Version", "-p:AgentPayloadSha256=$agentHash", "-p:AgentPayloadSignatureRequired=$($signatureRequired.ToString().ToLowerInvariant())", "-p:InstallerSignatureRequired=$($signatureRequired.ToString().ToLowerInvariant())", "-o", $output)
 & dotnet @installerArgs
 if ($LASTEXITCODE -ne 0) { throw "Windows installer publish failed with exit code $LASTEXITCODE." }
 
 $installer = Join-Path $output "AnishNovaPrintAgent-Setup.exe"
 $binary = Join-Path $output "PrintQRAgent.exe"
 if (!(Test-Path -LiteralPath $installer)) { throw "The installer publish did not produce the expected setup executable." }
+Sign-ReleaseArtifact $installer
 Copy-Item -LiteralPath $agentPublish -Destination $binary -Force
 
 foreach ($artifact in @($installer, $binary)) {
@@ -67,6 +104,7 @@ $manifest = [ordered]@{
   mandatory = $false
   releaseDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
   channel = "stable"
+  signatureRequired = $signatureRequired
   releaseNotes = @("Windows x64 self-contained release.", "Verified installer payload and improved paired startup reliability.")
   installer = [ordered]@{ fileName = "AnishNovaPrintAgent-Setup.exe"; fileSize = (Get-Item $installer).Length; sha256 = (Get-Sha256 $installer) }
   binary = [ordered]@{ fileName = "PrintQRAgent.exe"; fileSize = (Get-Item $binary).Length; sha256 = (Get-Sha256 $binary) }
@@ -80,3 +118,8 @@ Write-Host "Installer: $installer ($((Get-Item $installer).Length) bytes, SHA256
 Write-Host "Agent: $binary ($((Get-Item $binary).Length) bytes, SHA256 $($manifest.binary.sha256))"
 & node "apps/api/scripts/verify-agent-release.cjs" $Version $output
 if ($LASTEXITCODE -ne 0) { throw "Print agent artifact verification failed with exit code $LASTEXITCODE." }
+} finally {
+  if ($certificatePath -and (Test-Path -LiteralPath $certificatePath)) {
+    Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+  }
+}

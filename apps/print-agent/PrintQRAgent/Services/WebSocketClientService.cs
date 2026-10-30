@@ -19,6 +19,7 @@ namespace PrintQRAgent.Services
         private bool _isConnected;
         private bool _isApiConnected;
         private bool _isHeartbeatActive;
+        private bool _isSyncingPrinters;
         private readonly string? _configurationError;
         private readonly AgentPairingClient _pairingClient;
         private readonly AgentHeartbeatClient _heartbeatClient;
@@ -66,7 +67,9 @@ namespace PrintQRAgent.Services
         {
             try
             {
-                var printers = _spoolerService.GetInstalledPrinters();
+                // Virtual devices remain discoverable in the desktop UI, but are never published
+                // as shop customer-order destinations.
+                var printers = _spoolerService.GetInstalledPrinters().Where(printer => printer.IsPhysical).ToList();
                 var spoolerRunning = _spoolerService.IsSpoolerServiceRunning();
                 var isPaired = !string.IsNullOrEmpty(_config.AgentToken) && _config.AgentToken != "none";
 
@@ -112,21 +115,23 @@ namespace PrintQRAgent.Services
         /// <summary>
         /// Syncs discovered Windows printers to the cloud database
         /// </summary>
-        public async Task SyncPrintersAsync()
+        public async Task<bool> SyncPrintersAsync()
         {
             if (string.IsNullOrEmpty(_config.AgentToken) || _config.AgentToken == "none")
             {
-                return;
+                return false;
             }
+            if (_isSyncingPrinters) return false;
+            _isSyncingPrinters = true;
 
             try
             {
                 if (_configurationError != null)
                 {
                     _isApiConnected = false;
-                    return;
+                    return false;
                 }
-                var printers = _spoolerService.GetInstalledPrinters();
+                var printers = _spoolerService.GetInstalledPrinters().Where(printer => printer.IsPhysical).ToList();
                 using var request = AgentApiEndpoint.CreateAuthenticatedRequest(
                     HttpMethod.Post, _config.ServerUrl, "agents/printers/sync", _config.AgentToken);
                 request.Content = new StringContent(JsonSerializer.Serialize(new { printers }), Encoding.UTF8, "application/json");
@@ -136,19 +141,24 @@ namespace PrintQRAgent.Services
                 {
                     _isApiConnected = true;
                     LoggerService.LogInfo($"Synced {printers.Count} Windows printers to Shop Dashboard.");
+                    return true;
                 }
                 else
                 {
                     _isApiConnected = false;
+                    LoggerService.LogWarn($"Printer sync was rejected by the API (HTTP {(int)response.StatusCode}).");
+                    return false;
                 }
             }
             catch (Exception ex)
             {
                 _isApiConnected = false;
                 LoggerService.LogError("Printer sync exception", ex);
+                return false;
             }
             finally
             {
+                _isSyncingPrinters = false;
                 EmitHealthUpdate();
             }
         }
@@ -194,7 +204,7 @@ namespace PrintQRAgent.Services
                         {
                             try
                             {
-                                var printers = _spoolerService.GetInstalledPrinters();
+                                var printers = _spoolerService.GetInstalledPrinters().Where(printer => printer.IsPhysical).ToList();
                                 var result = await _heartbeatClient.SendAsync(_config.AgentToken, printers.Count, token);
                                 _isHeartbeatActive = result.success;
                                 _isApiConnected = result.success;
