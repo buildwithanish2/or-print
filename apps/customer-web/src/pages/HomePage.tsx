@@ -478,8 +478,16 @@ export const HomePage: React.FC<HomePageProps> = ({
             </button>
           </div>
 
-          {/* Mobile Menu Button (<= 768px / lg) - Animated Hamburger that toggles to X */}
-          <div className="lg:hidden flex items-center">
+          {/* Keep the shop login action available beside navigation at tablet/mobile widths. */}
+          <div className="lg:hidden flex shrink-0 items-center gap-2">
+            <a
+              href={`${SHOP_PORTAL_URL}/login`}
+              aria-label="Shop Owner Login"
+              className="h-11 px-3 sm:px-4 rounded-2xl flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-800 hover:text-purple-700 hover:border-purple-200 shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+            >
+              <Lock className="w-4 h-4" aria-hidden="true" />
+              <span className="hidden sm:inline text-xs font-bold">Shop Owner Login</span>
+            </a>
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -630,9 +638,9 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
 
             <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-[#080B20] tracking-tight leading-[1.12]">
-              Print Documents <br />
+              From Your Phone <br />
               <span className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 bg-clip-text text-transparent">
-                From Your Phone to the Shop
+                Print Straight to Your Shop
               </span>
             </h1>
 
@@ -645,49 +653,49 @@ export const HomePage: React.FC<HomePageProps> = ({
             </p>
 
             {/* 4 Micro Feature Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1 text-left">
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
-                <div className="w-7 h-7 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2.5 pt-1 text-center sm:text-left">
+              <div className="p-1.5 sm:p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+                <div className="w-8 h-8 sm:w-7 sm:h-7 mx-auto sm:mx-0 rounded-full sm:rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
                   <QrCode className="w-4 h-4" />
                 </div>
-                <div className="font-bold text-xs text-[#080B20]">QR Scan</div>
-                <div className="text-[10px] text-slate-500">Scan at counter</div>
+                <div className="font-bold text-[9px] sm:text-xs text-[#080B20]">QR Scan</div>
+                <div className="hidden sm:block text-[10px] text-slate-500">Scan at counter</div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
-                <div className="w-7 h-7 rounded-xl bg-pink-100 flex items-center justify-center text-pink-700">
+              <div className="p-1.5 sm:p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+                <div className="w-8 h-8 sm:w-7 sm:h-7 mx-auto sm:mx-0 rounded-full sm:rounded-xl bg-pink-100 flex items-center justify-center text-pink-700">
                   <UploadCloud className="w-4 h-4" />
                 </div>
-                <div className="font-bold text-xs text-[#080B20]">Upload</div>
-                <div className="text-[10px] text-slate-500">PDF &amp; Images</div>
+                <div className="font-bold text-[9px] sm:text-xs text-[#080B20]">Upload</div>
+                <div className="hidden sm:block text-[10px] text-slate-500">PDF &amp; Images</div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
-                <div className="w-7 h-7 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+              <div className="p-1.5 sm:p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+                <div className="w-8 h-8 sm:w-7 sm:h-7 mx-auto sm:mx-0 rounded-full sm:rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
                   <CreditCard className="w-4 h-4" />
                 </div>
-                <div className="font-bold text-xs text-[#080B20]">Direct Pay</div>
-                <div className="text-[10px] text-slate-500">Shop-configured method</div>
+                <div className="font-bold text-[9px] sm:text-xs text-[#080B20]">Direct Pay</div>
+                <div className="hidden sm:block text-[10px] text-slate-500">Shop-configured method</div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
-                <div className="w-7 h-7 rounded-xl bg-orange-100 flex items-center justify-center text-orange-700">
+              <div className="p-1.5 sm:p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+                <div className="w-8 h-8 sm:w-7 sm:h-7 mx-auto sm:mx-0 rounded-full sm:rounded-xl bg-orange-100 flex items-center justify-center text-orange-700">
                   <Printer className="w-4 h-4" />
                 </div>
-                <div className="font-bold text-xs text-[#080B20]">Auto Print</div>
-                <div className="text-[10px] text-slate-500">Eligible jobs only</div>
+                <div className="font-bold text-[9px] sm:text-xs text-[#080B20]">Auto Print</div>
+                <div className="hidden sm:block text-[10px] text-slate-500">Eligible jobs only</div>
               </div>
             </div>
 
             {/* CTAs */}
-            <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 pt-2">
+            <div className="grid w-full grid-cols-2 sm:flex sm:w-auto items-center justify-center lg:justify-start gap-2 sm:gap-3 pt-2">
               <a
                 href="#pricing"
                 onClick={(e) => {
                   e.preventDefault();
                   handleNavClick('#pricing');
                 }}
-                className="w-full sm:w-auto px-7 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 hover:opacity-95 text-white font-bold text-xs sm:text-sm shadow-lg shadow-purple-500/25 flex items-center justify-center space-x-2 transition-all transform active:scale-95 min-h-[48px]"
+                className="w-full sm:w-auto px-2.5 sm:px-7 py-3.5 rounded-xl sm:rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 hover:opacity-95 text-white font-bold text-[10px] sm:text-sm shadow-lg shadow-purple-500/25 flex items-center justify-center space-x-1 sm:space-x-2 transition-all transform active:scale-95 min-h-[48px]"
               >
                 <span>See Setup &amp; Pricing ↓</span>
               </a>
@@ -695,7 +703,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               <button
                 type="button"
                 onClick={onNavigateToShopRegister}
-                className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs sm:text-sm border border-slate-300 shadow-sm flex items-center justify-center space-x-2 transition-all min-h-[48px]"
+                className="w-full sm:w-auto px-2.5 sm:px-6 py-3.5 rounded-xl sm:rounded-2xl bg-white hover:bg-slate-50 text-slate-800 font-bold text-[10px] sm:text-sm border border-slate-300 shadow-sm flex items-center justify-center space-x-1 sm:space-x-2 transition-all min-h-[48px]"
               >
                 <Store className="w-4 h-4 text-purple-600" />
                 <span>Register Your Shop</span>

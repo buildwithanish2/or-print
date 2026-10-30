@@ -96,7 +96,40 @@ The repository is an npm-workspaces monorepo (`apps/*`, `packages/*`) with share
 | Referral / white-label pages | PrintQ has partner-related code but not verified parity with reference mechanics | Existing PrintQ partner flow retained; no external payout or white-label capability invented |
 | Feature detail / about / declaration | PrintQ's landing sections and legal routes | No pixel-level page parity verified; separate reference URLs mostly return the same shell, while reference product claims are not adopted without source evidence |
 
-Screenshots confirm the broad responsive hierarchy, but exact geometry, font rendering, color values, icon shapes and image positioning have not been measured against the reference. The Customer Web is the closest visual counterpart; the Shop and Admin portals have no matching authenticated reference screens. This code stage addresses the confirmed duplicate-navigation and spacing defect, not a claim of pixel-perfect replication.
+Screenshots confirm the broad responsive hierarchy, but exact geometry, font rendering, color values, icon shapes and image positioning have not been measured against the reference. The Customer Web is the closest visual counterpart; the Shop and Admin portals have no matching authenticated reference screens. This code stage addresses confirmed responsive hierarchy differences; it does not claim pixel-perfect replication.
+
+### Screenshot comparison — 2026-10-30
+
+Fresh controlled Chromium captures were taken with the same viewport, device scale factor 1, locale, timezone and reduced-motion settings. REA evidence IDs and screenshot SHA-256 values are recorded below so the before/after captures can be identified without checking image binaries into the repository. The captures are rendered inline in the task history; authenticated portal content was not captured because no test credentials were supplied.
+
+| Viewport | Reference before / after (evidence ID) | PrintQ Customer before (evidence ID, SHA-256) | PrintQ Customer after (evidence ID, SHA-256) |
+| --- | --- | --- | --- |
+| 1440×900 | `ev_741c8829ff9c5a0744ecda72d668def25608c8901213bd915bd4bab2ab039460` / `ev_0b7f4e8c401c706e0b3d35ae76e71f19f8000b2fb0b60763e1686b5bc2bbce3f` | `ev_7eae66a3f6a1bdb9df97cca7a200d45452ff76b605d319f33566aaccea09d300`, `7f4047bc18a46fafbd58d7996c25a00eeeee21e23baa52c83656baff2ccea533` | `ev_628ffd7691daa00dca34c9b529ab45bf5a145e16e6b8cf34cd6d9b89e96edfec`, `af5e46e7461ed588bb4e95ed55f67b3c2386db55cfe5a5aac3162404974a1563` |
+| 768×1024 | `ev_4631dc27a0e15e4307918345daf958de38c4b4be8e15b30d1f5f0dce08b6ae76` / `ev_297df3285fabba8b35c616c8b92f5396a69684573bc1fb1a465ff9fdbf0c8cb2` | `ev_4427833a58bacd6cc16ebeba06efb78283eae869741e68fa4966347ea17af90e`, `df7aadf69f266b0477dac0bcbd4fc88bc07896567e4c93cf2bd1bef2da366708` | `ev_66e03e05b6fb516f71895f77ea0f9a706472ad6a50240fe169b716d4aa3882a7`, `1a817cab748d00855c94f982e08c3b7277ae314592e3ed1beb1b7ec477b49a8f` |
+| 390×844 | `ev_97c0b42578ce6ef75a4eab8acd3a1975b6a955d1d95bd40d2a67426ffc89869a` / `ev_6ca5269edc06631d17326ef624c75f29686f2095cea3bac49644e44d689e9284` | `ev_1759545141b8205ceec5e642199591d203292658081c879ffe8390ef70a8a0d4`, `28628d62440158dd304156a418cb6b9db2e9baeb5fc736267ab8be5e81667204` | `ev_a109821820dbf6719d419ae48a98692ff41024453d62bb651b65bb99b930787f`, `43f2261e746b899885152966c07a245cdb0578a28c4aaf23bb1d1f3a5b8f6bdc` |
+
+#### Confirmed visual differences and changes
+
+- **Header/navigation:** At 768px and 390px the reference keeps a Shop Owner Login control beside its menu. Before this pass PrintQ hid the login link inside the drawer. The Customer Web now shows a lock icon link at 390px and icon plus “Shop Owner Login” at 768px, retaining the existing `SHOP_PORTAL_URL/login` destination. The 1440px desktop navigation remains unchanged. The reference QRSePrint logo, dotted ornament and its exact header treatment are intentionally not copied over AnishNova Print branding.
+- **Hero hierarchy:** The reference uses a QR/printer illustration, a short two-part headline and a scan/upload/pay/print icon row. PrintQ previously had a three-line headline, four bordered feature cards and a workflow preview panel. The headline now reads “From Your Phone / Print Straight to Your Shop”; at phone width the workflow steps are compact, centered icons and the two actions share one row. This reduces the vertical stack and moves the existing illustrative workflow preview higher on mobile. Desktop and tablet keep the existing evidence-based PrintQ workflow panel.
+- **Cards, colors and spacing:** Both pages use a warm light background and dotted texture. The reference uses pink/purple accents, a dark privacy banner and bespoke artwork; PrintQ retains its purple/pink/orange brand, small operational copy, four workflow cards and five-column feature strip. The reference’s “files deleted immediately” claim was not adopted because it is not established by the PrintQ retention configuration.
+- **Buttons:** The mobile customer actions were previously stacked and occupied two full rows. They now display side by side at 390px, matching the reference’s compact horizontal action grouping. Both remain the existing real pricing anchor and shop-registration action.
+- **Responsive result:** The final 390px capture shows no horizontal overflow, the login shortcut, four compact step tiles and side-by-side calls to action. At 768px the login label sits next to the hamburger and the desktop/tablet centered hero remains balanced. At 1440px the prior two-column layout remains intact. No screenshot establishes exact pixel equality or reproduces the reference’s custom QR/printer art.
+
+#### Portal screenshot scope
+
+The Shop Dashboard and Admin Web do not have corresponding authenticated reference pages. Their login routes were captured at 1440×900, 768×1024 and 390×844 to check responsive shape only:
+
+- Shop login: `ev_f5b295fc94591c5681ae89e21682820e6ebe36dcb29e3093ca9346051f388bc4` (1440), `ev_00d3878f18ce7cd74dd41303d5d23b0b9c9a7036cd1f887be247c52255b65804` (768), `ev_feb96100a3a923c0b4aec5367a5c8907041550f20365fbb851ea19775c181202` (390).
+- Admin login: `ev_fdcb86effc7dca6746a01ae560c6d65f123b922749f2cae94e7191aece50a8ff` (1440), `ev_56428392f65238f5c0a719b80b6ec7be0917ebcf4babf5a53ad7631e3dbe975d` (768), `ev_b4bbf23df83fe5a5c8dc80375701546e79f9e165dbc794a6eabea639353b0a94` (390).
+- Authenticated dashboard menus, data cards and workflows were not captured; comparing those would require test accounts and there are no matching reference screens to compare against.
+
+#### Remaining visual differences
+
+1. The custom reference QR phone/printer artwork and dark privacy banner have no directly equivalent verified PrintQ asset/content. PrintQ continues to show its labeled illustrative workflow card.
+2. Typography, logo, navigation wording, exact font metrics, feature strip content and hero element positions differ by design and brand; no pixel-diff or color sampling has been performed.
+3. The reference shows “Register Demo”, while PrintQ uses the real “Register Your Shop” flow; the latter was retained to avoid presenting a demo action that is not the existing registration workflow.
+4. Only the public Customer Web homepage is directly comparable. Portal login screenshots are responsive checks, not reference replication; authenticated pages and hidden menu states still need authorized test sessions for visual review.
 
 ## Confirmed findings and prioritized changes
 
