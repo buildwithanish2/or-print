@@ -15,10 +15,12 @@ namespace PrintQRAgent.Services
         private readonly HashSet<string> _processedIdempotencyKeys = new();
         private readonly object _sync = new();
 
-        public OfflineQueueService()
+        public OfflineQueueService(string? dataDirectory = null)
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var dir = Path.Combine(appData, "PrintQR", "Agent");
+            var dir = string.IsNullOrWhiteSpace(dataDirectory)
+                ? Path.Combine(appData, "PrintQR", "Agent")
+                : dataDirectory;
             Directory.CreateDirectory(dir);
             _queueFilePath = Path.Combine(dir, "local_queue.json");
             _processedFilePath = Path.Combine(dir, "processed_jobs.json");

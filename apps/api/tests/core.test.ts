@@ -25,6 +25,7 @@ import { createHash } from 'crypto';
 import { getAdminWebUrl, getApiBaseUrl, getCustomerWebUrl, getShopWebUrl } from '@printqr/config';
 import { validateAdminManagedSettings } from '../src/services/platform-settings.service';
 import { validateShopProvisioningCredentials } from '../src/services/shop-provisioning.service';
+import { WebSocketService } from '../src/services/socket.service';
 
 test('admin settings batch accepts valid pricing values and rejects invalid or unsupported values', () => {
   assert.deepEqual(validateAdminManagedSettings({ PLATFORM_SERVICE_FEE: '3.5', GST_RATE: '18' }), {
@@ -415,6 +416,121 @@ test('agent status retries are idempotently acknowledged and stale claims are bo
   const now = new Date('2026-10-30T12:00:00.000Z');
   assert.equal(getStaleAgentJobCutoff(now).toISOString(), '2026-10-30T11:45:00.000Z');
   assert.deepEqual([...AGENT_JOB_IN_FLIGHT_STATUSES], ['DOWNLOADING', 'PRINTING', 'SENT_TO_SPOOLER']);
+});
+
+test('manual print retry persists one new attempt key for websocket and polling delivery', async () => {
+  const db = prisma as any;
+  const original = {
+    findUnique: db.printJob.findUnique,
+    updateMany: db.printJob.updateMany,
+    reservationFind: db.freePrintReservation.findUnique,
+    transaction: db.$transaction,
+    dispatch: WebSocketService.dispatchPrintJob,
+    broadcastJob: WebSocketService.broadcastJobStatus,
+    broadcastOrder: WebSocketService.broadcastOrderUpdate,
+  };
+  const sourceFile = { url: '/files/safe-test.pdf', originalName: 'safe-test.pdf', mimeType: 'application/pdf' };
+  const initialJob: any = {
+    id: 'retry-job-1', orderId: 'retry-order-1', orderItemId: 'retry-item-1', shopId: 'retry-shop-1', printerId: 'retry-printer-1',
+    idempotencyKey: 'original-job-key', status: 'FAILED', attempts: 1, maxAttempts: 3, createdAt: new Date(),
+    order: { id: 'retry-order-1', orderNumber: 'ANP-RETRY1', shopId: 'retry-shop-1', paymentStatus: 'PAID', printStatus: 'FAILED' },
+    orderItem: { file: sourceFile, colorMode: 'BW', paperSize: 'A4', orientation: 'PORTRAIT', duplexMode: 'SIMPLEX', copies: 1, pageRange: 'ALL', pagesPerSheet: 1, quality: 'NORMAL', selectedPagesCount: 4 },
+    printer: { shopId: 'retry-shop-1', status: 'ONLINE' },
+  };
+  const persistedJob: any = { ...initialJob };
+  const updatedOrder: any = { ...initialJob.order, items: [], printJobs: [] };
+  let updateArgs: any;
+  let dispatched: any;
+  const tx: any = {
+    printJob: {
+      updateMany: async (args: any) => {
+        updateArgs = args;
+        Object.assign(persistedJob, {
+          status: args.data.status,
+          progressPercent: args.data.progressPercent,
+          errorMessage: args.data.errorMessage,
+          attempts: initialJob.attempts + 1,
+          idempotencyKey: args.data.idempotencyKey,
+          startedAt: null,
+          completedAt: null,
+        });
+        return { count: 1 };
+      },
+      findUnique: async () => persistedJob,
+    },
+    order: {
+      updateMany: async () => { updatedOrder.printStatus = 'QUEUED'; return { count: 1 }; },
+      findUnique: async () => updatedOrder,
+    },
+  };
+  const response: any = { statusCode: 200, body: undefined, status(code: number) { this.statusCode = code; return this; }, json(value: any) { this.body = value; return this; } };
+
+  try {
+    db.printJob.findUnique = async () => initialJob;
+    db.freePrintReservation.findUnique = async () => null;
+    db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
+    WebSocketService.dispatchPrintJob = async (payload: any) => { dispatched = payload; return true; };
+    WebSocketService.broadcastJobStatus = () => undefined;
+    WebSocketService.broadcastOrderUpdate = () => undefined;
+
+    await OrderController.retryPrintJob({
+      params: { jobId: initialJob.id },
+      body: { confirmPhysicalOutputReviewed: true },
+      user: { id: 'owner-1', role: 'SHOP_OWNER', shopId: initialJob.shopId },
+    } as any, response, (error: unknown) => { throw error; });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.data.idempotencyKey, 'original-job-key_retry_2');
+    assert.equal(updateArgs.data.idempotencyKey, response.body.data.idempotencyKey);
+    assert.equal(updateArgs.where.attempts, 1);
+    assert.equal(updateArgs.where.order.paymentStatus.in.includes('PAID'), true);
+    assert.equal(updateArgs.where.printer.status, 'ONLINE');
+    assert.equal(dispatched.idempotencyKey, response.body.data.idempotencyKey);
+    assert.equal(dispatched.orderNumber, 'ANP-RETRY1');
+    assert.equal(updatedOrder.printStatus, 'QUEUED');
+  } finally {
+    db.printJob.findUnique = original.findUnique;
+    db.printJob.updateMany = original.updateMany;
+    db.freePrintReservation.findUnique = original.reservationFind;
+    db.$transaction = original.transaction;
+    WebSocketService.dispatchPrintJob = original.dispatch;
+    WebSocketService.broadcastJobStatus = original.broadcastJob;
+    WebSocketService.broadcastOrderUpdate = original.broadcastOrder;
+  }
+});
+
+test('print retry requires physical-output review and rejects a concurrent stale retry without dispatch', async () => {
+  const db = prisma as any;
+  const original = { findUnique: db.printJob.findUnique, reservationFind: db.freePrintReservation.findUnique, transaction: db.$transaction, dispatch: WebSocketService.dispatchPrintJob };
+  const job: any = {
+    id: 'retry-job-race', orderId: 'retry-order-race', shopId: 'retry-shop-race', status: 'FAILED', attempts: 1, maxAttempts: 3,
+    order: { paymentStatus: 'PAID', printStatus: 'FAILED' },
+    orderItem: { file: { url: '/files/retry.pdf', originalName: 'retry.pdf', mimeType: 'application/pdf' } },
+    printer: { shopId: 'retry-shop-race', status: 'ONLINE' },
+  };
+  let dispatchCount = 0;
+  const tx: any = { printJob: { updateMany: async () => ({ count: 0 }) } };
+  const makeResponse = () => ({ statusCode: 200, body: undefined as any, status(code: number) { this.statusCode = code; return this; }, json(value: any) { this.body = value; return this; } });
+  try {
+    db.printJob.findUnique = async () => job;
+    db.freePrintReservation.findUnique = async () => null;
+    db.$transaction = async (callback: (transaction: any) => unknown) => callback(tx);
+    WebSocketService.dispatchPrintJob = async () => { dispatchCount += 1; return true; };
+
+    const missingConfirmation = makeResponse();
+    await OrderController.retryPrintJob({ params: { jobId: job.id }, body: {}, user: { role: 'SHOP_OWNER', shopId: job.shopId } } as any, missingConfirmation as any, (error: unknown) => { throw error; });
+    assert.equal(missingConfirmation.statusCode, 400);
+
+    const raced = makeResponse();
+    await OrderController.retryPrintJob({ params: { jobId: job.id }, body: { confirmPhysicalOutputReviewed: true }, user: { role: 'SHOP_OWNER', shopId: job.shopId } } as any, raced as any, (error: unknown) => { throw error; });
+    assert.equal(raced.statusCode, 409);
+    assert.equal(dispatchCount, 0);
+  } finally {
+    db.printJob.findUnique = original.findUnique;
+    db.freePrintReservation.findUnique = original.reservationFind;
+    db.$transaction = original.transaction;
+    WebSocketService.dispatchPrintJob = original.dispatch;
+  }
 });
 
 test('page range parser counts ALL pages', () => {

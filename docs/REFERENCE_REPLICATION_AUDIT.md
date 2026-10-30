@@ -218,3 +218,24 @@ The local agent page was exercised but its screenshot was intentionally discarde
 - The sandbox used synthetic local accounts and a scratch database; no order, payment, shop, or production setting was changed. Production login, live API data, cross-shop authorization, real payment and physical printing were not tested.
 - Screenshots show the post-fix local UI. The original authenticated reference site has no equivalent shop/admin screens. These captures therefore document PrintQ's responsive behavior and states, not reference parity.
 - Existing worktree README modification predates this audit stage and remains unrelated and uncommitted.
+
+### Verification refresh — 2026-10-30
+
+The repository was rechecked at `d224adcee17fac9dfa2b46c3c7130cddb81c5629` on `codex/reference-replication`. The origin branch points to the same commit. Current checks were rerun locally:
+
+| Check | Result |
+| --- | --- |
+| Shop Dashboard tests | 14 passed, 0 failed |
+| Admin Web tests | 10 passed, 0 failed |
+| Customer Web tests | 14 passed, 0 failed |
+| API tests | 56 passed, 0 failed |
+| Shop Dashboard type-check and production build | Passed |
+| Admin Web type-check and production build | Passed |
+| Customer Web type-check and production build | Passed |
+| API type-check and production build | Passed |
+| Prisma schema validation | Passed |
+| `git diff --check` | Passed |
+
+The existing authenticated screenshot set above was inspected. It shows shop and admin overviews at 1440×900, 768×1024 and 390×844, and selected operational detail pages at 1440×900. No new browser captures were made during this verification refresh because the desktop browser-capture surface was unavailable. Tablet/mobile captures of authenticated detail pages, and screens for Admin Users, Orders and general Settings (which are not standalone sections in the current Admin navigation), remain unverified or not present as described above. These results are local checks only; no production account, production record, Vercel deployment, payment, printer agent or physical printer was accessed.
+
+The pre-existing `README.md` modification remains untouched and unstaged. No application source change was needed in this verification-only continuation; the route, responsive-overview and loading/error-state fixes are already in the branch commit identified above.
