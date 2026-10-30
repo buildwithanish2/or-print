@@ -26,7 +26,7 @@ The reference's page shell advertises several separate products (WhatsApp printi
 
 The public shell has desktop navigation for Home, Pricing, How to Setup, Feature, About, Contact, Partner Program, Declaration and Shop Owner Login, plus a mobile navigation variant and promotional banners. The landing page order observed is product/hero, product/device choice, setup video, plans, WhatsApp product, Android product, cyber-cafe product, reviews, broader feature list, privacy/operations content, FAQs and footer. The `/requirements` flow collects shop/contact/plan details and explains WhatsApp pairing and print setup. The accessible content exposes no authenticated shop dashboard or customer transaction; those parts were not exercised.
 
-**Visual evidence and scope:** the reference homepage and its narrow, tablet and desktop layouts were captured during this work using the available controlled browser runtime. Local Customer Web, Shop Dashboard and Admin entry screens were also captured at desktop and mobile widths. The reference is a public marketing/product site; it does not expose an equivalent authenticated shop or super-admin console. Those PrintQ consoles therefore remain purpose-built operational applications, and are not represented as pixel replicas of unrelated reference pages. Screenshot captures are visual review evidence from the session and are not committed as production assets. Exact pixel equality has not been measured.
+**Visual evidence and scope:** reference homepage captures were reviewed at 390×844, 768×1024 and 1440×900. Local Customer Web, Shop Dashboard login and Admin login captures were reviewed at 390×844 and 1440×900. The reference is a public marketing/product site; it does not expose an equivalent authenticated shop or super-admin console. Those PrintQ consoles therefore remain purpose-built operational applications, and are not represented as pixel replicas of unrelated reference pages. Screenshot captures were reviewed inline and are not committed as production assets. Exact pixel equality has not been measured.
 
 ## PrintQ architecture and workflow map
 
@@ -88,6 +88,7 @@ The repository is an npm-workspaces monorepo (`apps/*`, `packages/*`) with share
 | Contact and partner forms | Existing lead APIs in `HomePage` | Success only follows an API success response; network/API errors are shown, not replaced with fabricated reference numbers |
 | Windows agent download | Agent release metadata endpoint | Version comes from validated API manifest; failed/invalid metadata shows unavailable with retry, no `1.0.0` fallback |
 | Customer header navigation | Customer Web `HomePage` | This stage removes duplicate Contact/Partner actions when those destinations already exist in API-configured navigation, keeps them available when omitted, tightens desktop spacing and corrects the repeated “from” in the hero headline |
+| Shop and Admin mobile navigation | Operational portal shells | Added dismissible scrims, Escape-to-close, accessible menu labels/state and explicit sidebar labels; operational content and permissions are unchanged |
 | WhatsApp print product | No verified equivalent identified in PrintQ source | Not copied or represented as implemented |
 | Android print app | No verified Android app in this monorepo | Not copied or represented as implemented |
 | Offline cyber-cafe suite | No verified equivalent in this monorepo | Not copied or represented as implemented |
@@ -122,7 +123,7 @@ Screenshots confirm the broad responsive hierarchy, but exact geometry, font ren
 
 Automated checks run on this branch:
 
-- Customer Web tests: 13 passed.
+- Customer Web tests: 14 passed.
 - API tests: 56 passed.
 - Shop Dashboard tests: 11 passed.
 - Admin Web tests: 10 passed.
@@ -134,3 +135,10 @@ Automated checks run on this branch:
 - Root `npm run type-check` and root `npm run build`: blocked at `prisma generate` by Windows `EPERM` renaming the SQLite query-engine DLL in the shared `node_modules/.prisma/client` path. The shared package builds preceding this step passed. The API compiler/build passed using the already generated client. Existing running Node processes were left undisturbed.
 
 Not verified in this environment: exact pixel measurements, production shop/order/payment behavior, authenticated shop/admin sessions, Windows multi-printer discovery, actual printer output, Vercel deployment and live API data. No live payment, production order or deployment was initiated.
+
+### Follow-on reference-replication stages (2026-10-30)
+
+- Customer Web tests now report 14 passed (including API-navigation deduplication), type check passed, and production build passed.
+- Shop Dashboard tests: 11 passed; type check and production build passed after adding the narrow-screen drawer behavior.
+- Admin Web tests: 10 passed; type check and production build passed after adding the narrow-screen drawer behavior.
+- The source changes intentionally do not claim visual parity for reference products that PrintQ does not implement. No production deployment was performed.
