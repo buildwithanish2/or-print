@@ -11,18 +11,25 @@ export const ShopsManagement: React.FC<ShopsManagementProps> = ({ onNavigateToAd
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedQR, setSelectedQR] = useState<any>(null);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchShops = async () => {
     setLoading(true);
     try {
-      let url = '/admin/shops?limit=50';
+      let url = `/admin/shops?limit=25&page=${page}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       const res = await api.get(url);
       if (res.data.success) {
         setShops(res.data.data);
+        setPagination(res.data.meta || { page, totalPages: 1, total: 0 });
+        setLoadError(null);
+      } else {
+        setLoadError('The API did not return the shop list. Retry.');
       }
-    } catch (err) {
-      console.error('Failed to load shops:', err);
+    } catch {
+      setLoadError('Could not load shops. Check your connection and retry.');
     } finally {
       setLoading(false);
     }
@@ -30,7 +37,7 @@ export const ShopsManagement: React.FC<ShopsManagementProps> = ({ onNavigateToAd
 
   useEffect(() => {
     fetchShops();
-  }, []);
+  }, [page]);
 
   const handleUpdateStatus = async (shopId: string, newStatus: string) => {
     try {
@@ -70,7 +77,7 @@ export const ShopsManagement: React.FC<ShopsManagementProps> = ({ onNavigateToAd
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && fetchShops()}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (page === 1) fetchShops(); else setPage(1); } }}
               placeholder="Search Shop Name / Email"
               className="bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-indigo-500 w-48 md:w-60"
             />
@@ -89,6 +96,7 @@ export const ShopsManagement: React.FC<ShopsManagementProps> = ({ onNavigateToAd
       </div>
 
       <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-lg">
+        {loadError && <div role="alert" className="mb-4 flex justify-between text-sm text-rose-300">{loadError}<button type="button" onClick={fetchShops} className="underline">Retry</button></div>}
         {loading ? (
           <div className="p-8 text-center text-xs text-slate-400">Loading shops...</div>
         ) : (
@@ -205,6 +213,7 @@ export const ShopsManagement: React.FC<ShopsManagementProps> = ({ onNavigateToAd
           </div>
         )}
       </div>
+      <div className="flex items-center justify-between text-xs text-slate-400"><span>{pagination.total} shops · page {pagination.page} of {Math.max(1, pagination.totalPages)}</span><div className="flex gap-2"><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Previous</button><button type="button" disabled={page >= pagination.totalPages || loading} onClick={() => setPage((current) => current + 1)} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Next</button></div></div>
 
       {/* QR Code Inspection Modal */}
       {selectedQR && (

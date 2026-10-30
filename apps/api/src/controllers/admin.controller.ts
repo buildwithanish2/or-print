@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
+import { validateAdminManagedSettings } from '../services/platform-settings.service';
+import { validateShopProvisioningCredentials } from '../services/shop-provisioning.service';
 import { CouponSchema } from '@printqr/validation';
 import { QRCodeService } from '../services/qr.service';
 import { DEFAULT_PLATFORM_PRICING_RULES, getCustomerWebUrl } from '@printqr/config';
@@ -107,7 +109,9 @@ export class AdminController {
       if (!name || !ownerName || !email || !password || !phone) {
         return res.status(400).json({ success: false, message: 'All required shop and owner fields must be provided' });
       }
-      if (String(password).length < 12) return res.status(400).json({ success: false, message: 'Shop owner passwords must contain at least 12 characters' });
+      const credentialsError = validateShopProvisioningCredentials(name, password);
+      if (credentialsError) return res.status(400).json({ success: false, message: credentialsError });
+      const normalizedShopName = String(name).trim();
 
       const existingUser = await prisma.user.findUnique({
         where: { email: email.toLowerCase() },
@@ -118,7 +122,7 @@ export class AdminController {
       }
 
       // Generate unique slug
-      let baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      let baseSlug = normalizedShopName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       if (!baseSlug) baseSlug = 'print-center';
       let slug = baseSlug;
       let counter = 1;
@@ -144,7 +148,7 @@ export class AdminController {
         // 2. Create Shop
         const shop = await tx.shop.create({
           data: {
-            name,
+            name: normalizedShopName,
             slug,
             ownerId: user.id,
             email: email.toLowerCase(),
@@ -170,7 +174,7 @@ export class AdminController {
             shopId: shop.id,
             code: `QR-${slug.toUpperCase()}`,
             targetUrl,
-            label: `${name} Counter QR`,
+            label: `${normalizedShopName} Counter QR`,
             qrDataUrl,
             isActive: true,
           },
@@ -304,7 +308,9 @@ export class AdminController {
    */
   static async listShops(req: Request, res: Response, next: NextFunction) {
     try {
-      const { status, search, page = 1, limit = 50 } = req.query;
+      const { status, search } = req.query;
+      const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '50'), 10) || 50));
       const where: any = {};
       if (status) where.status = status;
       if (search) {
@@ -315,12 +321,12 @@ export class AdminController {
         ];
       }
 
-      const skip = (Number(page) - 1) * Number(limit);
+      const skip = (page - 1) * limit;
       const [shops, total] = await Promise.all([
         prisma.shop.findMany({
           where,
           skip,
-          take: Number(limit),
+          take: limit,
           orderBy: { createdAt: 'desc' },
           include: {
             owner: { select: { id: true, name: true, email: true, phone: true } },
@@ -336,7 +342,7 @@ export class AdminController {
       return res.status(200).json({
         success: true,
         data: shops,
-        meta: { page: Number(page), limit: Number(limit), total, totalPages: Math.ceil(total / Number(limit)) },
+        meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
       });
     } catch (err) {
       next(err);
@@ -682,12 +688,27 @@ export class AdminController {
   static async savePlatformSetting(req: Request, res: Response, next: NextFunction) {
     try {
       const { key, value } = req.body;
+      const validation = validateAdminManagedSettings({ [key]: String(value ?? '') });
+      if (!validation.valid) return res.status(400).json({ success: false, message: validation.message });
       const setting = await prisma.platformSetting.upsert({
         where: { key },
-        update: { value: String(value) },
-        create: { key, value: String(value) },
+        update: { value: validation.values[key] },
+        create: { key, value: validation.values[key] },
       });
       return res.status(200).json({ success: true, message: 'Setting saved', data: setting });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async savePlatformSettingsBatch(req: Request, res: Response, next: NextFunction) {
+    try {
+      const validation = validateAdminManagedSettings(req.body?.settings);
+      if (!validation.valid) return res.status(400).json({ success: false, message: validation.message });
+      const result = await prisma.$transaction(Object.entries(validation.values).map(([key, value]) => prisma.platformSetting.upsert({
+        where: { key }, update: { value }, create: { key, value },
+      })));
+      return res.status(200).json({ success: true, message: 'Platform settings saved', data: Object.fromEntries(result.map((setting) => [setting.key, setting.value])) });
     } catch (err) {
       next(err);
     }

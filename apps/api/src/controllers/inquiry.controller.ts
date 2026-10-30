@@ -418,6 +418,8 @@ export class InquiryController {
   static async listPartnerApplications(req: Request, res: Response, next: NextFunction) {
     try {
       const { search, status } = req.query;
+      const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '50'), 10) || 50));
       const whereClause: any = {};
 
       if (status && status !== 'ALL') {
@@ -435,11 +437,11 @@ export class InquiryController {
         ];
       }
 
-      const applications = await prisma.partnerApplication.findMany({
-        where: whereClause,
-        orderBy: { createdAt: 'desc' },
-      });
-      return res.status(200).json({ success: true, data: applications });
+      const [applications, total] = await Promise.all([
+        prisma.partnerApplication.findMany({ where: whereClause, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+        prisma.partnerApplication.count({ where: whereClause }),
+      ]);
+      return res.status(200).json({ success: true, data: applications, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
     } catch (err) {
       next(err);
     }

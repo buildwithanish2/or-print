@@ -23,6 +23,25 @@ import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
 import { getAdminWebUrl, getApiBaseUrl, getCustomerWebUrl, getShopWebUrl } from '@printqr/config';
+import { validateAdminManagedSettings } from '../src/services/platform-settings.service';
+import { validateShopProvisioningCredentials } from '../src/services/shop-provisioning.service';
+
+test('admin settings batch accepts valid pricing values and rejects invalid or unsupported values', () => {
+  assert.deepEqual(validateAdminManagedSettings({ PLATFORM_SERVICE_FEE: '3.5', GST_RATE: '18' }), {
+    valid: true,
+    values: { PLATFORM_SERVICE_FEE: '3.5', GST_RATE: '18' },
+  });
+  assert.equal(validateAdminManagedSettings({ GST_RATE: '101' }).valid, false);
+  assert.equal(validateAdminManagedSettings({ PRICE_CAP_A4_BW: '-1' }).valid, false);
+  assert.equal(validateAdminManagedSettings({ ADMIN_PASSWORD: 'secret' }).valid, false);
+});
+
+test('manual shop provisioning accepts readable shop names and enforces a bounded owner password', () => {
+  assert.equal(validateShopProvisioningCredentials('ABC Digital Print', 'a-unique-owner-password'), null);
+  assert.equal(validateShopProvisioningCredentials('  ', 'a-unique-owner-password'), 'Shop name must contain 2 to 100 characters');
+  assert.equal(validateShopProvisioningCredentials('ABC Digital Print', 'short'), 'Shop owner password must contain 12 to 128 characters');
+  assert.equal(validateShopProvisioningCredentials('ABC Digital Print', 'p'.repeat(129)), 'Shop owner password must contain 12 to 128 characters');
+});
 
 test('customer portal URL uses production domain when missing or set to localhost in production', () => {
   const originalNodeEnv = process.env.NODE_ENV;

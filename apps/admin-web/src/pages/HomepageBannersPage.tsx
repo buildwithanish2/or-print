@@ -12,6 +12,9 @@ export const HomepageBannersPage: React.FC = () => {
   const [bgGradient, setBgGradient] = useState('from-purple-900/80 via-pink-900/60 to-slate-900');
   const [displayOrder, setDisplayOrder] = useState('1');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isEnabled, setIsEnabled] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fetchBanners = async () => {
     try {
@@ -41,19 +44,39 @@ export const HomepageBannersPage: React.FC = () => {
         ctaUrl,
         bgGradient,
         displayOrder: Number(displayOrder),
-        isEnabled: true,
+        isEnabled,
       };
 
+      setSaving(true);
+      setErrorMessage(null);
       const res = await api.post('/admin/banners', payload);
       if (res.data.success) {
-        fetchBanners();
+        await fetchBanners();
         setTitle('');
         setSubtitle('');
+        setCtaText('Register Your Shop');
+        setCtaUrl('/shop/register');
+        setDisplayOrder(String(banners.length + 1));
+        setIsEnabled(true);
         setEditingId(null);
       }
-    } catch (err: any) {
-      alert(err.message || 'Failed to save banner');
+    } catch {
+      setErrorMessage('Could not save the banner. Check the connection and retry.');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const editBanner = (banner: any) => {
+    setEditingId(banner.id);
+    setTitle(banner.title || '');
+    setSubtitle(banner.subtitle || '');
+    setCtaText(banner.ctaText || '');
+    setCtaUrl(banner.ctaUrl || '');
+    setBgGradient(banner.bgGradient || 'from-purple-900/80 via-pink-900/60 to-slate-900');
+    setDisplayOrder(String(banner.displayOrder ?? 1));
+    setIsEnabled(Boolean(banner.isEnabled));
+    setErrorMessage(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -135,13 +158,22 @@ export const HomepageBannersPage: React.FC = () => {
             </div>
           </div>
 
+          <div className="space-y-3">
+            <label className="block text-slate-300 font-bold mb-1">Display order</label>
+            <input type="number" min="1" step="1" value={displayOrder} onChange={(e) => setDisplayOrder(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white" />
+            <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />Visible on public homepage</label>
+            {editingId && <label className="block text-slate-300 font-bold">Background style<input type="text" value={bgGradient} onChange={(e) => setBgGradient(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono" /></label>}
+            {errorMessage && <p role="alert" className="text-rose-300">{errorMessage}</p>}
+          </div>
+
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-purple-500/20"
+              disabled={saving}
+              className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-purple-500/20 disabled:opacity-60"
             >
               <Save className="w-4 h-4" />
-              <span>{editingId ? 'Update Banner' : 'Publish Banner'}</span>
+              <span>{saving ? 'Saving…' : editingId ? 'Update Banner' : 'Publish Banner'}</span>
             </button>
           </div>
         </form>
@@ -152,6 +184,7 @@ export const HomepageBannersPage: React.FC = () => {
             <div key={b.id} className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-purple-400">Order #{b.displayOrder}</span>
+                <button type="button" onClick={() => editBanner(b)} className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs">Edit</button>
                 <button
                   type="button"
                   onClick={() => handleDelete(b.id)}

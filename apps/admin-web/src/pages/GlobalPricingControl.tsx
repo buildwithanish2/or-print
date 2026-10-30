@@ -1,28 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Tag, Save, Check, ShieldAlert, Sliders } from 'lucide-react';
+import { Save, Check, Sliders, RefreshCw } from 'lucide-react';
 
 export const GlobalPricingControl: React.FC = () => {
-  const [settings, setSettings] = useState<Record<string, string>>({
-    PRICE_CAP_A4_BW: '5.0',
-    PRICE_CAP_A4_COLOR: '25.0',
-    PLATFORM_SERVICE_FEE: '2.0',
-    GST_RATE: '18.0',
-  });
+  const [settings, setSettings] = useState<Record<string, string>>({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fetchSettings = async () => {
     setLoading(true);
     try {
       const res = await api.get('/admin/settings');
       if (res.data.success && res.data.data) {
-        setSettings((prev) => ({ ...prev, ...res.data.data }));
+        setSettings(res.data.data);
+        setErrorMsg(null);
+      } else {
+        setErrorMsg('The server did not return pricing settings. Retry before editing.');
       }
-    } catch (err) {
-      console.error('Failed to load settings:', err);
+    } catch {
+      setErrorMsg('Could not load saved pricing settings. Existing values are unchanged. Check the connection and retry.');
     } finally {
       setLoading(false);
     }
@@ -38,16 +37,21 @@ export const GlobalPricingControl: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (['PRICE_CAP_A4_BW', 'PRICE_CAP_A4_COLOR', 'PLATFORM_SERVICE_FEE', 'GST_RATE'].some((key) => {
+      const value = Number(settings[key]);
+      return settings[key] === undefined || !Number.isFinite(value) || value < 0;
+    })) {
+      setErrorMsg('Enter a valid non-negative number for every pricing field.');
+      return;
+    }
     setSaving(true);
     setSuccessMsg(null);
+    setErrorMsg(null);
     try {
-      for (const [key, value] of Object.entries(settings)) {
-        await api.post('/admin/settings', { key, value });
-      }
+      await api.put('/admin/settings/batch', { settings: Object.fromEntries(['PRICE_CAP_A4_BW', 'PRICE_CAP_A4_COLOR', 'PLATFORM_SERVICE_FEE', 'GST_RATE'].map((key) => [key, settings[key]])) });
       setSuccessMsg('Global pricing parameters & caps saved successfully!');
-      setTimeout(() => setSuccessMsg(null), 3000);
-    } catch (err: any) {
-      alert(err.message || 'Failed to save pricing control settings');
+    } catch {
+      setErrorMsg('Could not save pricing settings. No changes were applied; check the connection and retry.');
     } finally {
       setSaving(false);
     }
@@ -74,9 +78,10 @@ export const GlobalPricingControl: React.FC = () => {
           <span>{successMsg}</span>
         </div>
       )}
+      {errorMsg && <div role="alert" className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center justify-between gap-3"><span>{errorMsg}</span><button type="button" onClick={fetchSettings} className="inline-flex items-center gap-1 font-bold"><RefreshCw className="w-3.5 h-3.5"/>Retry</button></div>}
 
       {/* Form */}
-      <form onSubmit={handleSave} className="p-6 md:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-6 text-xs">
+      {loading ? <div className="p-8 text-center text-slate-400">Loading saved pricing settings…</div> : <form onSubmit={handleSave} className="p-6 md:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-6 text-xs">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="p-5 rounded-2xl bg-slate-800/40 border border-slate-700/60 space-y-3">
             <h3 className="font-bold text-sm text-white">Merchant Price Caps (Max Allowable)</h3>
@@ -88,7 +93,7 @@ export const GlobalPricingControl: React.FC = () => {
                 <input
                   type="number"
                   step="0.5"
-                  value={settings.PRICE_CAP_A4_BW || '5.0'}
+                  value={settings.PRICE_CAP_A4_BW ?? ''}
                   onChange={(e) => handleChange('PRICE_CAP_A4_BW', e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
                 />
@@ -99,7 +104,7 @@ export const GlobalPricingControl: React.FC = () => {
                 <input
                   type="number"
                   step="0.5"
-                  value={settings.PRICE_CAP_A4_COLOR || '25.0'}
+                  value={settings.PRICE_CAP_A4_COLOR ?? ''}
                   onChange={(e) => handleChange('PRICE_CAP_A4_COLOR', e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
                 />
@@ -117,7 +122,7 @@ export const GlobalPricingControl: React.FC = () => {
                 <input
                   type="number"
                   step="0.5"
-                  value={settings.PLATFORM_SERVICE_FEE || '2.0'}
+                  value={settings.PLATFORM_SERVICE_FEE ?? ''}
                   onChange={(e) => handleChange('PLATFORM_SERVICE_FEE', e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
                 />
@@ -128,7 +133,7 @@ export const GlobalPricingControl: React.FC = () => {
                 <input
                   type="number"
                   step="0.5"
-                  value={settings.GST_RATE || '18.0'}
+                  value={settings.GST_RATE ?? ''}
                   onChange={(e) => handleChange('GST_RATE', e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
                 />
@@ -140,14 +145,14 @@ export const GlobalPricingControl: React.FC = () => {
         <div className="pt-2 flex justify-end">
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || loading}
             className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center space-x-1.5 transition-all shadow-md shadow-purple-500/20"
           >
             <Save className="w-4 h-4" />
             <span>{saving ? 'Saving...' : 'Save Global Controls'}</span>
           </button>
         </div>
-      </form>
+      </form>}
     </div>
   );
 };

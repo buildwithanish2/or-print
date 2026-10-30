@@ -9,6 +9,9 @@ export const WebsiteNavigationPage: React.FC = () => {
   const [path, setPath] = useState('');
   const [isExternal, setIsExternal] = useState(false);
   const [openInNewTab, setOpenInNewTab] = useState(false);
+  const [isEnabled, setIsEnabled] = useState(true);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [displayOrder, setDisplayOrder] = useState('1');
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -39,21 +42,26 @@ export const WebsiteNavigationPage: React.FC = () => {
         isExternal,
         openInNewTab,
         displayOrder: Number(displayOrder),
-        isEnabled: true,
+        isEnabled,
       };
 
+      setSaving(true);
+      setFormError(null);
       const res = await api.post('/admin/navigation', payload);
       if (res.data.success) {
-        fetchItems();
+        await fetchItems();
         setLabel('');
         setPath('');
         setIsExternal(false);
         setOpenInNewTab(false);
+        setIsEnabled(true);
         setDisplayOrder(String(items.length + 2));
         setEditingId(null);
       }
-    } catch (err: any) {
-      alert(err.message || 'Failed to save navigation item');
+    } catch {
+      setFormError('Could not save this navigation item. Your current saved item was not changed. Retry.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -63,6 +71,7 @@ export const WebsiteNavigationPage: React.FC = () => {
     setPath(item.path);
     setIsExternal(item.isExternal);
     setOpenInNewTab(item.openInNewTab);
+    setIsEnabled(item.isEnabled);
     setDisplayOrder(String(item.displayOrder));
   };
 
@@ -146,6 +155,10 @@ export const WebsiteNavigationPage: React.FC = () => {
                 />
                 <span className="text-slate-300 text-[11px]">Open New Tab</span>
               </label>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} className="rounded border-slate-700 bg-slate-800 text-purple-600" />
+                <span className="text-slate-300 text-[11px]">Enabled on public site</span>
+              </label>
 
               <label className="flex items-center space-x-2 cursor-pointer">
                 <input
@@ -160,12 +173,14 @@ export const WebsiteNavigationPage: React.FC = () => {
           </div>
 
           <div className="pt-2 flex items-center space-x-2">
+            {formError && <p role="alert" className="text-rose-300">{formError}</p>}
             <button
               type="submit"
+              disabled={saving}
               className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-purple-500/20"
             >
               <Save className="w-4 h-4" />
-              <span>{editingId ? 'Update Item' : 'Create Item'}</span>
+              <span>{saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}</span>
             </button>
 
             {editingId && (
@@ -193,6 +208,7 @@ export const WebsiteNavigationPage: React.FC = () => {
                 <th className="pb-3">Menu Label</th>
                 <th className="pb-3">Target Path</th>
                 <th className="pb-3">Type</th>
+                <th className="pb-3">Visibility</th>
                 <th className="pb-3 text-right pr-2">Actions</th>
               </tr>
             </thead>
@@ -202,6 +218,7 @@ export const WebsiteNavigationPage: React.FC = () => {
                   <td className="py-3 pl-2 font-mono font-bold text-purple-400">{item.displayOrder}</td>
                   <td className="py-3 font-bold text-white">{item.label}</td>
                   <td className="py-3 font-mono text-slate-300">{item.path}</td>
+                  <td className="py-3 text-slate-400">{item.isEnabled ? 'Enabled' : 'Hidden'}</td>
                   <td className="py-3">
                     {item.isExternal ? (
                       <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px]">

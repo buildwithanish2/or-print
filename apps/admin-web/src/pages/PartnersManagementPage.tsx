@@ -24,6 +24,8 @@ export const PartnersManagementPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedPartner, setSelectedPartner] = useState<any>(null);
   const [newNote, setNewNote] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
 
   const fetchPartners = async () => {
     setLoading(true);
@@ -31,10 +33,13 @@ export const PartnersManagementPage: React.FC = () => {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
       if (statusFilter !== 'ALL') params.append('status', statusFilter);
+      params.set('page', String(page));
+      params.set('limit', '25');
 
       const res = await api.get(`/admin/partners?${params.toString()}`);
       if (res.data.success) {
         setPartners(res.data.data || []);
+        setPagination(res.data.pagination || { page, pages: 1, total: 0 });
       }
     } catch (err) {
       console.error('Failed to load partners:', err);
@@ -45,7 +50,7 @@ export const PartnersManagementPage: React.FC = () => {
 
   useEffect(() => {
     fetchPartners();
-  }, [statusFilter]);
+  }, [statusFilter, page]);
 
   const updatePartnerStatus = async (partnerId: string, status: string) => {
     try {
@@ -120,7 +125,6 @@ export const PartnersManagementPage: React.FC = () => {
           <span>Refresh List</span>
         </button>
       </div>
-
       {/* Search & Filter */}
       <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="w-full sm:w-80 relative">
@@ -137,7 +141,7 @@ export const PartnersManagementPage: React.FC = () => {
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setPage(1); setStatusFilter(e.target.value); }}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
           >
             <option value="ALL">All Partner Statuses</option>
@@ -185,7 +189,7 @@ export const PartnersManagementPage: React.FC = () => {
                 partners.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-850/50 transition-colors">
                     <td className="px-5 py-3.5 font-mono text-pink-400 font-bold">
-                      {p.partnerNumber || 'PARTNER-2026-000001'}
+                      {p.partnerNumber || '—'}
                     </td>
                     <td className="px-5 py-3.5 space-y-0.5">
                       <div className="font-bold text-white">{p.name}</div>
@@ -196,12 +200,12 @@ export const PartnersManagementPage: React.FC = () => {
                       <div className="text-slate-500 text-[10px]">{p.email}</div>
                     </td>
                     <td className="px-5 py-3.5">
-                      <div>{p.city}</div>
-                      <div className="text-[11px] text-slate-500">{p.state || 'India'}</div>
+                      <div>{p.city || '—'}</div>
+                      <div className="text-[11px] text-slate-500">{p.state || '—'}</div>
                     </td>
                     <td className="px-5 py-3.5">
-                      <div>{p.printerCount || 2} Printers</div>
-                      <div className="text-[11px] text-slate-500 font-mono">{p.monthlyVolume || '1000+'} pages/mo</div>
+                      <div>{p.printerCount ?? '—'} Printers</div>
+                      <div className="text-[11px] text-slate-500 font-mono">{p.monthlyVolume ?? '—'} pages/mo</div>
                     </td>
                     <td className="px-5 py-3.5">{getStatusBadge(p.status)}</td>
                     <td className="px-5 py-3.5 text-[11px] text-slate-400 whitespace-nowrap">
@@ -227,6 +231,8 @@ export const PartnersManagementPage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      <div className="flex items-center justify-between text-xs text-slate-400"><span>{pagination.total} applications · page {pagination.page} of {Math.max(1, pagination.pages)}</span><div className="flex gap-2"><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Previous</button><button type="button" disabled={page >= pagination.pages || loading} onClick={() => setPage((p) => p + 1)} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Next</button></div></div>
 
       {/* PARTNER DRAWER */}
       {selectedPartner && (

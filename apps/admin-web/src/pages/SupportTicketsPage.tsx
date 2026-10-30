@@ -23,6 +23,8 @@ export const SupportTicketsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [replyText, setReplyText] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
 
   const fetchTickets = async () => {
     setLoading(true);
@@ -31,10 +33,13 @@ export const SupportTicketsPage: React.FC = () => {
       if (search) params.append('search', search);
       if (categoryFilter !== 'ALL') params.append('category', categoryFilter);
       if (statusFilter !== 'ALL') params.append('status', statusFilter);
+      params.set('page', String(page));
+      params.set('limit', '25');
 
       const res = await api.get(`/admin/tickets?${params.toString()}`);
       if (res.data.success) {
         setTickets(res.data.data || []);
+        setPagination(res.data.pagination || { page, pages: 1, total: 0 });
       }
     } catch (err) {
       console.error('Failed to load support tickets:', err);
@@ -45,7 +50,7 @@ export const SupportTicketsPage: React.FC = () => {
 
   useEffect(() => {
     fetchTickets();
-  }, [categoryFilter, statusFilter]);
+  }, [categoryFilter, statusFilter, page]);
 
   const updateTicketStatus = async (ticketId: string, status: string) => {
     try {
@@ -135,7 +140,7 @@ export const SupportTicketsPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={(e) => { setPage(1); setCategoryFilter(e.target.value); }}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
           >
             <option value="ALL">All Categories</option>
@@ -151,7 +156,7 @@ export const SupportTicketsPage: React.FC = () => {
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setPage(1); setStatusFilter(e.target.value); }}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
           >
             <option value="ALL">All Statuses</option>
@@ -198,7 +203,7 @@ export const SupportTicketsPage: React.FC = () => {
                 tickets.map((t) => (
                   <tr key={t.id} className="hover:bg-slate-850/50 transition-colors">
                     <td className="px-5 py-3.5 font-mono text-amber-400 font-bold">
-                      {t.ticketNumber || 'TICKET-2026-000001'}
+                      {t.ticketNumber || '—'}
                     </td>
                     <td className="px-5 py-3.5 space-y-0.5">
                       <div className="font-bold text-white">{t.shop?.name || 'Unassigned Shop'}</div>
@@ -241,6 +246,7 @@ export const SupportTicketsPage: React.FC = () => {
           </table>
         </div>
       </div>
+      <div className="flex items-center justify-between text-xs text-slate-400"><span>{pagination.total} tickets · page {pagination.page} of {Math.max(1, pagination.pages)}</span><div className="flex gap-2"><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Previous</button><button type="button" disabled={page >= pagination.pages || loading} onClick={() => setPage((p) => p + 1)} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Next</button></div></div>
 
       {/* TICKET DETAILS DRAWER */}
       {selectedTicket && (

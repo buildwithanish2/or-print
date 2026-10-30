@@ -9,9 +9,9 @@ import {
   Copy,
   Check,
   ArrowRight,
-  Shield,
   Loader2,
-  Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface AddShopPageProps {
@@ -29,6 +29,7 @@ export const AddShopPage: React.FC<AddShopPageProps> = ({ onShopCreated }) => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [address, setAddress] = useState('MG Road, Commercial Complex');
   const [city, setCity] = useState('Bengaluru');
   const [state, setState] = useState('Karnataka');
@@ -207,11 +208,15 @@ export const AddShopPage: React.FC<AddShopPageProps> = ({ onShopCreated }) => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-slate-300 font-bold mb-1">Shop Name *</label>
+              <label htmlFor="new-shop-name" className="block text-slate-300 font-bold mb-1">Shop Name *</label>
               <input
-                type="password"
+                id="new-shop-name"
+                type="text"
+                name="shopName"
+                autoComplete="organization"
                 required
-                minLength={12}
+                minLength={2}
+                maxLength={100}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Apex Digital Print"
@@ -256,14 +261,26 @@ export const AddShopPage: React.FC<AddShopPageProps> = ({ onShopCreated }) => {
             </div>
 
             <div>
-              <label className="block text-slate-300 font-bold mb-1">Initial Password *</label>
-              <input
-                type="text"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
-              />
+              <label className="block text-slate-300 font-bold mb-1" htmlFor="initial-shop-password">Initial Password *</label>
+              <div className="relative">
+                <input
+                  id="initial-shop-password"
+                  type={showPassword ? 'text' : 'password'}
+                  name="newShopOwnerPassword"
+                  autoComplete="new-password"
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 12 characters"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 pr-11 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+                />
+                <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide initial password' : 'Show initial password'} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg text-slate-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">Use a unique password with 12–128 characters. It is sent only over the secure API connection.</p>
             </div>
 
             <div>

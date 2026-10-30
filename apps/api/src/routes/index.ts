@@ -101,18 +101,13 @@ router.get('/demo-video/public', async (req, res, next) => {
 router.get('/statistics/public', async (req, res) => {
   try {
     const settings = await prisma.platformSetting.findMany();
-    const map: Record<string, string> = {
-      STATS_SHOPS: '450+',
-      STATS_DOCS: '1.2M+',
-      STATS_CUSTOMERS: '98%',
-      STATS_CITIES: '35+',
-    };
+    const map: Record<string, string> = {};
     settings.forEach((s) => {
       map[s.key] = s.value;
     });
     res.status(200).json({ success: true, data: map });
   } catch {
-    res.status(200).json({ success: true, data: {} });
+    res.status(500).json({ success: false, message: 'Unable to load public statistics' });
   }
 });
 

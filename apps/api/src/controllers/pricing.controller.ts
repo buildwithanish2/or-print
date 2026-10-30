@@ -64,6 +64,16 @@ export class PricingController {
           settings as PrintSettingsDTO,
           institutionId
         );
+        if (!institutionId && settings.paperSize.toUpperCase() === 'A4') {
+          const capKey = settings.colorMode === 'COLOR' ? 'PRICE_CAP_A4_COLOR' : 'PRICE_CAP_A4_BW';
+          const capSetting = await prisma.platformSetting.findUnique({ where: { key: capKey } });
+          if (!capSetting) return res.status(503).json({ success: false, message: 'Platform pricing cap is not configured. Contact an administrator.' });
+          {
+            const cap = Number(capSetting.value);
+            if (!Number.isFinite(cap) || cap < 0) return res.status(503).json({ success: false, message: 'Platform pricing cap configuration is invalid. Contact an administrator.' });
+            if (breakdown.unitPricePerPage > cap) return res.status(409).json({ success: false, code: 'SHOP_RATE_ABOVE_PLATFORM_CAP', message: `This shop's A4 rate exceeds the current platform cap. Please contact the shop.` });
+          }
+        }
         itemBreakdowns.push({ ...breakdown, colorMode: settings.colorMode });
       }
 
@@ -143,6 +153,23 @@ export class PricingController {
     try {
       const data = PricingRuleSchema.parse(req.body);
       const shopId = req.user?.shopId || data.shopId || null;
+
+      // Apply Super Admin's A4 price caps at the API boundary so shop owners
+      // cannot bypass the dashboard control with a direct request.
+      if (shopId && data.paperSize.toUpperCase() === 'A4') {
+        const capKey = data.colorMode === 'COLOR' ? 'PRICE_CAP_A4_COLOR' : 'PRICE_CAP_A4_BW';
+        const configuredCap = await prisma.platformSetting.findUnique({ where: { key: capKey } });
+        if (!configuredCap) return res.status(503).json({ success: false, message: 'Platform pricing cap is not configured. Contact an administrator.' });
+        {
+          const cap = Number(configuredCap.value);
+          if (!Number.isFinite(cap) || cap < 0) {
+            return res.status(503).json({ success: false, message: 'Platform pricing cap configuration is invalid. Contact an administrator.' });
+          }
+          if (Number(data.singleSidePrice) > cap) {
+            return res.status(400).json({ success: false, message: `The A4 ${data.colorMode === 'COLOR' ? 'color' : 'black and white'} rate cannot exceed ₹${cap.toFixed(2)} per page.` });
+          }
+        }
+      }
 
       const existing = await prisma.pricingRule.findFirst({
         where: { shopId, paperSize: data.paperSize, colorMode: data.colorMode },

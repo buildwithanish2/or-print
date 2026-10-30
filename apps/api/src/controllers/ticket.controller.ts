@@ -112,6 +112,8 @@ export class TicketController {
   static async listAdminTickets(req: Request, res: Response, next: NextFunction) {
     try {
       const { search, category, status, priority } = req.query;
+      const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? '50'), 10) || 50));
       const whereClause: any = {};
 
       if (category && category !== 'ALL') whereClause.category = String(category);
@@ -128,16 +130,18 @@ export class TicketController {
         ];
       }
 
-      const tickets = await prisma.supportTicket.findMany({
+      const [tickets, total] = await Promise.all([prisma.supportTicket.findMany({
         where: whereClause,
+        skip: (page - 1) * limit,
+        take: limit,
         include: {
           shop: { select: { id: true, name: true, phone: true, email: true } },
           user: { select: { id: true, name: true, email: true } },
         },
         orderBy: { createdAt: 'desc' },
-      });
+      }), prisma.supportTicket.count({ where: whereClause })]);
 
-      return res.status(200).json({ success: true, data: tickets });
+      return res.status(200).json({ success: true, data: tickets, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
     } catch (err) {
       next(err);
     }

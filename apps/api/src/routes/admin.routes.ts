@@ -43,6 +43,7 @@ router.post('/demo-video', AdminController.saveDemoVideo);
 
 // Platform Settings & Stats
 router.get('/settings', AdminController.getPlatformSettings);
+router.put('/settings/batch', AdminController.savePlatformSettingsBatch);
 router.post('/settings', AdminController.savePlatformSetting);
 
 // Website Navigation Manager

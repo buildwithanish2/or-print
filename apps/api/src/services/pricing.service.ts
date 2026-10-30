@@ -201,8 +201,20 @@ export class PricingEngineService {
     }
 
     const discountedSubtotal = Math.max(0, subtotal - couponDiscount);
-    const serviceFee = APP_CONFIG.PLATFORM_SERVICE_FEE;
-    const gstRatePercent = APP_CONFIG.GST_RATE_PERCENT;
+    // Admin-managed platform settings are authoritative when present. The environment
+    // values remain a compatibility default for installations not yet seeded.
+    const platformSettings = await prisma.platformSetting.findMany({
+      where: { key: { in: ['PLATFORM_SERVICE_FEE', 'GST_RATE'] } },
+    });
+    const settingValues = new Map(platformSettings.map((setting) => [setting.key, Number(setting.value)]));
+    const configuredFee = settingValues.get('PLATFORM_SERVICE_FEE');
+    const configuredGst = settingValues.get('GST_RATE');
+    const serviceFee = Number.isFinite(configuredFee) && configuredFee! >= 0
+      ? configuredFee!
+      : APP_CONFIG.PLATFORM_SERVICE_FEE;
+    const gstRatePercent = Number.isFinite(configuredGst) && configuredGst! >= 0
+      ? configuredGst!
+      : APP_CONFIG.GST_RATE_PERCENT;
     const gstAmount = (discountedSubtotal * gstRatePercent) / 100;
     const finalTotal = discountedSubtotal + gstAmount + serviceFee;
 

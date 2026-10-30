@@ -227,12 +227,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [demoVideoVisible, setDemoVideoVisible] = useState(true);
   const [publicNavigation, setPublicNavigation] = useState<any[] | null>(null);
   const [homepageBanners, setHomepageBanners] = useState<any[] | null>(null);
-  const [stats, setStats] = useState<Record<string, string>>({
-    STATS_SHOPS: '450+',
-    STATS_DOCS: '1.2M+',
-    STATS_CUSTOMERS: '99.4%',
-    STATS_CITIES: '35+',
-  });
+  const [stats, setStats] = useState<Record<string, string>>({});
 
   const [legalPages, setLegalPages] = useState<{ slug: string; title: string }[]>([
     { slug: 'terms', title: 'Terms of Service' },
@@ -344,7 +339,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       .then((r) => r.json())
       .then((res) => {
         if (res.success && res.data) {
-          setStats((prev) => ({ ...prev, ...res.data }));
+          setStats(res.data);
         }
       })
       .catch(() => {});
@@ -916,19 +911,19 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8 text-center">
             <div className="space-y-1">
-              <div className="text-2xl sm:text-4xl font-black font-mono text-white">{stats.STATS_SHOPS || '450+'}</div>
+              <div className="text-2xl sm:text-4xl font-black font-mono text-white">{stats.STATS_SHOPS || '—'}</div>
               <div className="text-xs font-semibold text-slate-400">Shops Connected</div>
             </div>
             <div className="space-y-1">
-              <div className="text-2xl sm:text-4xl font-black font-mono text-purple-400">{stats.STATS_DOCS || '1.2M+'}</div>
+              <div className="text-2xl sm:text-4xl font-black font-mono text-purple-400">{stats.STATS_DOCS || '—'}</div>
               <div className="text-xs font-semibold text-slate-400">Documents Printed</div>
             </div>
             <div className="space-y-1">
-              <div className="text-2xl sm:text-4xl font-black font-mono text-pink-400">{stats.STATS_CUSTOMERS || '99.4%'}</div>
+              <div className="text-2xl sm:text-4xl font-black font-mono text-pink-400">{stats.STATS_CUSTOMERS || '—'}</div>
               <div className="text-xs font-semibold text-slate-400">Successful Print Jobs</div>
             </div>
             <div className="space-y-1">
-              <div className="text-2xl sm:text-4xl font-black font-mono text-amber-400">{stats.STATS_CITIES || '35+'}</div>
+              <div className="text-2xl sm:text-4xl font-black font-mono text-amber-400">{stats.STATS_CITIES || '—'}</div>
               <div className="text-xs font-semibold text-slate-400">Available Across India</div>
             </div>
           </div>

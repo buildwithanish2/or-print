@@ -30,6 +30,8 @@ export const LeadsManagementPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   const [typeFilter, setTypeFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0, limit: 50 });
 
   // Selected Lead Drawer
   const [selectedLead, setSelectedLead] = useState<any>(null);
@@ -53,6 +55,8 @@ export const LeadsManagementPage: React.FC = () => {
       if (statusFilter !== 'ALL') params.append('status', statusFilter);
       if (priorityFilter !== 'ALL') params.append('priority', priorityFilter);
       if (typeFilter !== 'ALL') params.append('type', typeFilter);
+      params.set('page', String(page));
+      params.set('limit', '50');
 
       const [leadsRes, kpiRes] = await Promise.all([
         api.get(`/admin/leads?${params.toString()}`),
@@ -61,6 +65,7 @@ export const LeadsManagementPage: React.FC = () => {
 
       if (leadsRes.data.success) {
         setLeads(leadsRes.data.data || []);
+        setPagination(leadsRes.data.pagination || { page, pages: 1, total: 0, limit: 50 });
       }
       if (kpiRes.data.success && kpiRes.data.data) {
         setKpis(kpiRes.data.data);
@@ -74,11 +79,12 @@ export const LeadsManagementPage: React.FC = () => {
 
   useEffect(() => {
     fetchLeads();
-  }, [statusFilter, priorityFilter, typeFilter]);
+  }, [statusFilter, priorityFilter, typeFilter, page]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchLeads();
+    if (page === 1) fetchLeads();
+    else setPage(1);
   };
 
   const openLeadDrawer = async (leadId: string) => {
@@ -247,7 +253,7 @@ export const LeadsManagementPage: React.FC = () => {
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setPage(1); setStatusFilter(e.target.value); }}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
           >
             <option value="ALL">All Statuses</option>
@@ -261,7 +267,7 @@ export const LeadsManagementPage: React.FC = () => {
 
           <select
             value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
+            onChange={(e) => { setPage(1); setPriorityFilter(e.target.value); }}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
           >
             <option value="ALL">All Priorities</option>
@@ -273,7 +279,7 @@ export const LeadsManagementPage: React.FC = () => {
 
           <select
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
+            onChange={(e) => { setPage(1); setTypeFilter(e.target.value); }}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
           >
             <option value="ALL">All Sources</option>
@@ -318,7 +324,7 @@ export const LeadsManagementPage: React.FC = () => {
                 leads.map((lead) => (
                   <tr key={lead.id} className="hover:bg-slate-850/50 transition-colors">
                     <td className="px-5 py-3.5 font-mono text-purple-400 font-bold">
-                      {lead.leadNumber || 'LEAD-2026-000101'}
+                      {lead.leadNumber || '—'}
                     </td>
                     <td className="px-5 py-3.5 font-bold text-white">
                       {lead.name}
@@ -337,7 +343,7 @@ export const LeadsManagementPage: React.FC = () => {
                     </td>
                     <td className="px-5 py-3.5 space-y-0.5 text-slate-300">
                       <div>{lead.shopName || '—'}</div>
-                      <div className="text-[11px] text-slate-500">{lead.city || 'India'}</div>
+                      <div className="text-[11px] text-slate-500">{lead.city || '—'}</div>
                     </td>
                     <td className="px-5 py-3.5">
                       {getPriorityBadge(lead.priority)}
@@ -369,6 +375,10 @@ export const LeadsManagementPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+      </div>
+      <div className="flex items-center justify-between text-xs text-slate-400">
+        <span>{pagination.total} leads · page {pagination.page} of {Math.max(1, pagination.pages)}</span>
+        <div className="flex gap-2"><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Previous</button><button type="button" disabled={page >= pagination.pages || loading} onClick={() => setPage((current) => current + 1)} className="px-3 py-2 rounded-lg bg-slate-800 disabled:opacity-40">Next</button></div>
       </div>
 
       {/* LEAD DETAILS DRAWER / MODAL */}
