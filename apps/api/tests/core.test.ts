@@ -17,7 +17,7 @@ import { prisma } from '../src/prisma';
 import { EmailService } from '../src/services/email.service';
 import { requireAdmin, requireSuperAdmin } from '../src/middleware/rbac.middleware';
 import { errorHandler } from '../src/middleware/error.middleware';
-import { agentArtifactDownloadHeaders, agentReleaseMetadata, resolveAgentArtifact, canAgentReportStatus, canDispatchPrintJob } from '../src/services/agent-artifact.service';
+import { AGENT_JOB_IN_FLIGHT_STATUSES, agentArtifactDownloadHeaders, agentReleaseMetadata, resolveAgentArtifact, canAgentReportStatus, canDispatchPrintJob, getStaleAgentJobCutoff, isAgentStatusReportIdempotent } from '../src/services/agent-artifact.service';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -405,6 +405,16 @@ test('agent status transitions stop at spooler acceptance until physical complet
   assert.equal(canAgentReportStatus('SENT_TO_SPOOLER', 'COMPLETED'), false);
   assert.equal(canAgentReportStatus('SENT_TO_SPOOLER', 'FAILED'), true);
   assert.equal(canAgentReportStatus('FAILED', 'PRINTING'), false);
+});
+
+test('agent status retries are idempotently acknowledged and stale claims are bounded for safe review', () => {
+  assert.equal(isAgentStatusReportIdempotent('SENT_TO_SPOOLER', 'SENT_TO_SPOOLER'), true);
+  assert.equal(isAgentStatusReportIdempotent('FAILED', 'FAILED'), true);
+  assert.equal(isAgentStatusReportIdempotent('PRINTING', 'FAILED'), false);
+  assert.equal(isAgentStatusReportIdempotent('COMPLETED', 'COMPLETED'), false);
+  const now = new Date('2026-10-30T12:00:00.000Z');
+  assert.equal(getStaleAgentJobCutoff(now).toISOString(), '2026-10-30T11:45:00.000Z');
+  assert.deepEqual([...AGENT_JOB_IN_FLIGHT_STATUSES], ['DOWNLOADING', 'PRINTING', 'SENT_TO_SPOOLER']);
 });
 
 test('page range parser counts ALL pages', () => {

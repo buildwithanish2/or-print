@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_URL, SHOP_PORTAL_URL } from '../lib/api';
-import { resolvePublicNavigation, resolvePublicPlans } from '../lib/public-home-content.mjs';
+import { resolveAgentRelease, resolvePublicNavigation, resolvePublicPlans } from '../lib/public-home-content.mjs';
 import {
   Printer,
   Home,
@@ -54,137 +54,46 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 
-const DEFAULT_SAAS_PLANS = [
-  {
-    id: 'plan-starter',
-    name: 'Starter',
-    description: 'Designed for college campus stationery and photocopy centers',
-    priceMonthly: 649,
-    priceYearly: 5990,
-    maxPrinters: 2,
-    maxOrdersPerMonth: 500,
-    features: [
-      '2 Windows Printer Connections',
-      'Up to 500 monthly customer orders',
-      'Direct UPI Payments (0% Fees)',
-      'Custom A4 Standee Designer',
-      'Instant Windows Spooler Dispatch',
-      'SMS & WhatsApp notifications',
-      'Standard Email Support',
-    ],
-    isPopular: false,
-    ctaText: 'Choose Starter',
-  },
-  {
-    id: 'plan-pro',
-    name: 'Pro',
-    description: 'Most popular for high-volume commercial digital print centers',
-    priceMonthly: 799,
-    priceYearly: 7490,
-    maxPrinters: 5,
-    maxOrdersPerMonth: 2500,
-    features: [
-      '5 Windows Printer Connections',
-      'Up to 2,500 monthly orders',
-      'Direct UPI + Razorpay/Cashfree',
-      'Smart Duplex & Color Routing',
-      'Multi-Operator Staff Accounts',
-      'Offline Queue Buffer',
-      'Revenue & Analytics Dashboard',
-      'Priority WhatsApp Support',
-    ],
-    isPopular: true,
-    ctaText: 'Get Pro Access',
-  },
-  {
-    id: 'plan-premium',
-    name: 'Premium',
-    description: 'Enterprise grade for multi-branch printing hubs and mega xerox centers',
-    priceMonthly: 999,
-    priceYearly: 9490,
-    maxPrinters: 15,
-    maxOrdersPerMonth: 10000,
-    features: [
-      '15 Printer Connections',
-      'Unlimited monthly customer orders',
-      'Custom Store Domain Support',
-      'Dedicated Windows Spooler Daemon',
-      'Staff RBAC & Audit Logs',
-      'Advanced Queue Prioritization',
-      'Dedicated Account Manager (24/7)',
-    ],
-    isPopular: false,
-    ctaText: 'Get Premium',
-  },
-];
-
-const DEFAULT_TESTIMONIALS = [
-  {
-    quote:
-      'AnishNova Print completely eliminated the long rush hours at our college xerox center. Students scan the counter QR, pay via UPI, and collect their prints with zero WhatsApp confusion.',
-    author: 'Rajesh Sharma',
-    role: 'Owner, ABC Digital Print Hub',
-    rating: 5,
-    city: 'Bengaluru',
-  },
-  {
-    quote:
-      'The Windows Desktop Agent connected to our HP LaserJet in under 2 minutes. The automatic duplex and color routing has boosted our monthly shop revenue by 40%.',
-    author: 'Pooja Verma',
-    role: 'Proprietor, Pooja Photocopy Center',
-    rating: 5,
-    city: 'Delhi NCR',
-  },
-  {
-    quote:
-      'Super clean and fast for mobile users. Customers love that they don’t have to carry infected pendrives or share their personal phone numbers over WhatsApp.',
-    author: 'Kiran Patel',
-    role: 'Manager, Campus Express Print',
-    rating: 5,
-    city: 'Pune',
-  },
-];
-
 const FAQ_ITEMS = [
   {
     q: 'How does contactless QR printing work for customers?',
-    a: 'Customers simply scan your shop’s permanent counter QR code using any smartphone camera. It opens the web app instantly without installing anything. They upload their document (PDF, Word, Images), customize color/duplex settings, pay securely via UPI, and the document is instantly spooled to your physical printer.',
+    a: 'Customers scan the shop QR code, upload a supported document, choose the print options available for that shop, and review the server-calculated price. The order is tracked online. Printing is available after the configured payment or free-print authorization is confirmed.',
   },
   {
     q: 'Do customers need to install any mobile app or use WhatsApp?',
-    a: 'No! Customers do not need to install any mobile application or share files via WhatsApp. Everything works securely inside their mobile browser (Chrome, Safari, etc.) in under 30 seconds.',
+    a: 'Customers can use the QR printing flow in a mobile browser. A customer account is not required for the regular guest order flow where the shop supports it.',
   },
   {
     q: 'How do customer payments work? Can I use my own UPI ID?',
-    a: 'Yes! AnishNova Print supports Direct UPI. Customer print payments go 100% directly into your personal or business UPI bank account (Google Pay, PhonePe, Paytm, BHIM). There are zero intermediate platform deductions for customer prints.',
+    a: 'Available payment methods depend on the shop configuration. Direct UPI requests may require the shop operator to verify the submitted reference. A UPI app success screen or customer-submitted reference alone does not confirm payment.',
   },
   {
     q: 'What printers and operating systems are supported?',
-    a: 'Any standard printer installed on Windows 10/11 is fully supported (HP, Canon, Epson, Brother, Ricoh, Xerox, Konica Minolta). The AnishNova Print Agent integrates natively with the Windows Print Spooler.',
+    a: 'The Windows Print Agent uses printers installed in Windows. Availability and print options depend on the installed driver and the shop’s agent configuration.',
   },
   {
     q: 'How does the Windows Print Agent work?',
-    a: 'The Windows Print Agent is a lightweight background daemon (PrintQRAgent.exe). You install it once on your shop PC and pair it with your shop code. When a customer pays, the agent automatically downloads the document and spools it directly to your designated printer.',
+    a: 'A shop operator pairs the installed Windows Print Agent with a temporary code from the dashboard, selects a printer, and keeps the agent available. Eligible jobs are delivered to the paired shop. The dashboard reports the status reported by the agent; spooler acceptance does not prove that paper physically came out.',
   },
   {
     q: 'Does the Windows Agent need to be reinstalled when an update is released?',
-    a: 'No! The Windows Agent features an in-place atomic auto-updater. Future updates download and replace the binary silently in the background while preserving your printer configurations and pairing tokens.',
+    a: 'Use the release information and installation instructions shown in the Shop Dashboard. Do not assume silent self-updates are available unless the current release explicitly supports them.',
   },
   {
     q: 'Can I route Color and Black & White prints to different printers?',
-    a: 'Yes! AnishNova Print supports smart multi-printer routing. You can designate one printer for Black & White jobs and another high-speed printer for Color pages.',
+    a: 'Print options and printer capabilities are configured for each shop. Separate automatic routing by color mode is not advertised here unless it is explicitly configured and supported by that shop.',
   },
   {
     q: 'Are uploaded documents secure and private?',
-    a: 'Absolutely. Documents are transferred over encrypted HTTPS tunnels and automatically deleted from the cloud once printing completes. Your customers’ privacy is 100% safeguarded.',
+    a: 'Documents are handled by the platform’s upload and retention workflow. Avoid uploading sensitive documents unless you are comfortable sharing them with the selected shop; exact deletion timing follows the configured retention policy.',
   },
   {
     q: 'How do I register and start accepting print orders at my shop?',
-    a: 'Click "Register Your Shop", complete the 4-step registration, download your custom high-resolution A4 counter standee QR, and install the Windows Print Agent. You can be up and running in under 5 minutes!',
+    a: 'Use Register Your Shop to submit shop details, then follow the account activation and subscription steps shown by the platform. Generate the shop QR and pair the Windows Agent from the Shop Dashboard when those steps are available.',
   },
   {
     q: 'What happens if my shop’s internet goes offline temporarily?',
-    a: 'The AnishNova Print Agent maintains an offline queue buffer. Orders placed while the connection is unstable will automatically resume and print as soon as connectivity restores.',
+    a: 'The dashboard and agent need connectivity to exchange job updates. If a connection drops, check the order and agent status before retrying a print so an uncertain job is not printed twice.',
   },
 ];
 
@@ -217,15 +126,19 @@ export const HomePage: React.FC<HomePageProps> = ({
   onNavigateToShopRegister,
   onNavigateToLegal,
 }) => {
-  const [plans, setPlans] = useState<any[]>(DEFAULT_SAAS_PLANS);
+  const [plans, setPlans] = useState<any[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState('');
+  const [plansRetry, setPlansRetry] = useState(0);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
-  const [testimonials, setTestimonials] = useState<any[]>(DEFAULT_TESTIMONIALS);
-  const [demoVideo, setDemoVideo] = useState<any>({
-    title: 'AnishNova Print Automated Spooler Walkthrough',
-    videoUrl: 'https://www.youtube-nocookie.com/embed/qOPE-90Um8g',
-    isActive: true,
-  });
-  const [demoVideoVisible, setDemoVideoVisible] = useState(true);
+  const [testimonials, setTestimonials] = useState<any[]>([]);
+  const [demoVideo, setDemoVideo] = useState<any>(null);
+  const [demoVideoVisible, setDemoVideoVisible] = useState(false);
+  const [agentRelease, setAgentRelease] = useState<any>(null);
+  const [agentReleaseError, setAgentReleaseError] = useState('');
+  const [agentReleaseRetry, setAgentReleaseRetry] = useState(0);
+  const [contactError, setContactError] = useState('');
+  const [partnerError, setPartnerError] = useState('');
   const [publicNavigation, setPublicNavigation] = useState<any[] | null>(null);
   const [homepageBanners, setHomepageBanners] = useState<any[] | null>(null);
   const [stats, setStats] = useState<Record<string, string>>({});
@@ -303,21 +216,26 @@ export const HomePage: React.FC<HomePageProps> = ({
     };
   }, [mobileMenuOpen, showContactModal, showPartnerModal, showVideoModal]);
 
-  // Fetch dynamic public content from the backend. Keep the existing landing
-  // defaults if the API is temporarily unavailable, but honor an explicit
-  // disabled/empty video response so Admin changes are reflected publicly.
+  // Public commercial and operational facts come from the backend; an API
+  // failure must not silently substitute sample prices, reviews, or status.
   useEffect(() => {
+    let cancelled = false;
+    setPlansLoading(true);
+    setPlansError('');
     fetch(`${API_BASE_URL}/plans/public`)
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error('Pricing is temporarily unavailable. Please retry.'); return r.json(); })
       .then((res) => {
-        if (res.success) setPlans(resolvePublicPlans(res.data, DEFAULT_SAAS_PLANS));
+        const livePlans = resolvePublicPlans(res.data);
+        if (!res.success || !livePlans.length) throw new Error('No active subscription plans are currently published. Please contact us for pricing.');
+        if (!cancelled) setPlans(livePlans);
       })
-      .catch(() => {});
+      .catch((error) => { if (!cancelled) { setPlans([]); setPlansError(error.message || 'Pricing is temporarily unavailable. Please retry.'); } })
+      .finally(() => { if (!cancelled) setPlansLoading(false); });
 
     fetch(`${API_BASE_URL}/testimonials/public`)
       .then((r) => r.json())
       .then((res) => {
-        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        if (res.success && Array.isArray(res.data)) {
           setTestimonials(
             res.data.map((t: any) => ({
               quote: t.review,
@@ -334,11 +252,20 @@ export const HomePage: React.FC<HomePageProps> = ({
     fetch(`${API_BASE_URL}/statistics/public`)
       .then((r) => r.json())
       .then((res) => {
-        if (res.success && res.data) {
+        if (res.success && res.data && typeof res.data === 'object') {
           setStats(res.data);
         }
       })
       .catch(() => {});
+
+    fetch(`${API_BASE_URL}/agents/update/latest`, { cache: 'no-store' })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.message || 'Agent release information is temporarily unavailable.');
+        return resolveAgentRelease({ data: body });
+      })
+      .then((release) => { if (!cancelled) { setAgentRelease(release); setAgentReleaseError(''); } })
+      .catch((error) => { if (!cancelled) { setAgentRelease(null); setAgentReleaseError(error.message || 'Agent release information is temporarily unavailable.'); } });
 
     fetch(`${API_BASE_URL}/demo-video/public`, { cache: 'no-store' })
       .then((response) => {
@@ -379,10 +306,12 @@ export const HomePage: React.FC<HomePageProps> = ({
         }
       })
       .catch(() => {});
-  }, []);
+    return () => { cancelled = true; };
+  }, [plansRetry, agentReleaseRetry]);
 
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setContactError('');
     setContactLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/inquiries/contact`, {
@@ -399,9 +328,10 @@ export const HomePage: React.FC<HomePageProps> = ({
         }),
       });
       const data = await res.json();
-      setContactLeadId(data.leadNumber || 'LEAD-2026-000101');
-    } catch {
-      setContactLeadId('LEAD-2026-' + Math.floor(100000 + Math.random() * 900000));
+      if (!res.ok || data.success !== true) throw new Error(data.message || 'We could not submit your enquiry. Please try again.');
+      setContactLeadId(data.leadNumber || 'submitted');
+    } catch (error: any) {
+      setContactError(error.message || 'We could not submit your enquiry. Please try again.');
     } finally {
       setContactLoading(false);
     }
@@ -409,6 +339,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   const handlePartnerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPartnerError('');
     setPartnerLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/inquiries/partner`, {
@@ -427,9 +358,10 @@ export const HomePage: React.FC<HomePageProps> = ({
         }),
       });
       const data = await res.json();
-      setPartnerLeadId(data.partnerNumber || 'PARTNER-2026-000012');
-    } catch {
-      setPartnerLeadId('PARTNER-2026-' + Math.floor(100000 + Math.random() * 900000));
+      if (!res.ok || data.success !== true) throw new Error(data.message || 'We could not submit your partner application. Please try again.');
+      setPartnerLeadId(data.partnerNumber || 'submitted');
+    } catch (error: any) {
+      setPartnerError(error.message || 'We could not submit your partner application. Please try again.');
     } finally {
       setPartnerLoading(false);
     }
@@ -698,7 +630,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-[#080B20] tracking-tight leading-[1.12]">
               Print Documents from <br />
               <span className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 bg-clip-text text-transparent">
-                Your Phone. Instantly.
+                From Your Phone to the Shop
               </span>
             </h1>
 
@@ -707,7 +639,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </p>
 
             <p className="text-xs sm:text-sm text-slate-600 max-w-xl mx-auto lg:mx-0 leading-relaxed">
-              Upload documents directly from your mobile browser, pay securely via your own UPI, and get your physical prints within seconds.
+              Upload from a mobile browser, review the shop-calculated price, and follow the selected shop’s payment and print-status updates.
             </p>
 
             {/* 4 Micro Feature Cards */}
@@ -733,7 +665,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <CreditCard className="w-4 h-4" />
                 </div>
                 <div className="font-bold text-xs text-[#080B20]">Direct Pay</div>
-                <div className="text-[10px] text-slate-500">Instant UPI</div>
+                <div className="text-[10px] text-slate-500">Shop-configured method</div>
               </div>
 
               <div className="p-3 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-1">
@@ -741,7 +673,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <Printer className="w-4 h-4" />
                 </div>
                 <div className="font-bold text-xs text-[#080B20]">Auto Print</div>
-                <div className="text-[10px] text-slate-500">Windows spooler</div>
+                <div className="text-[10px] text-slate-500">Eligible jobs only</div>
               </div>
             </div>
 
@@ -780,7 +712,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <div className="w-3 h-3 rounded-full bg-emerald-400" />
                 </div>
                 <span className="text-[10px] font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
-                  REAL-TIME SPOOLER
+                  PRINTQ WORKFLOW PREVIEW
                 </span>
               </div>
 
@@ -792,59 +724,34 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <span>Customer Mobile Screen</span>
                   </div>
                   <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                    SCAN VERIFIED
+                    ILLUSTRATIVE FLOW
                   </span>
                 </div>
 
                 <div className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between text-xs">
                   <div className="flex items-center space-x-2 truncate">
                     <FileText className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                    <span className="font-semibold text-slate-800 truncate text-[11px]">Thesis_Final_Print.pdf</span>
+                    <span className="font-semibold text-slate-800 truncate text-[11px]">sample-document.pdf</span>
                   </div>
-                  <span className="font-mono font-bold text-purple-700 flex-shrink-0 ml-2">₹43.60</span>
+                  <span className="font-mono font-bold text-purple-700 flex-shrink-0 ml-2">Price from shop API</span>
                 </div>
               </div>
 
-              {/* Verified Payment Component */}
-              <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-1.5 font-bold text-emerald-900">
-                    <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                    <span>Direct UPI Payment Received</span>
-                  </div>
-                  <span className="text-[10px] font-bold text-emerald-700 font-mono flex-shrink-0">100% TO SHOP</span>
-                </div>
-                <div className="text-[11px] text-slate-600 flex justify-between">
-                  <span>Payee: <strong>ABC Digital Print Hub</strong></span>
-                  <span className="font-mono text-slate-500">Ref: ANP-827760</span>
-                </div>
-              </div>
-
-              {/* Printer Hardware Status Component */}
               <div className="p-3.5 rounded-2xl bg-slate-900 text-white space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2 font-bold">
-                    <Printer className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                    <span className="truncate">HP LaserJet Pro 400</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-emerald-400 font-bold flex items-center space-x-1 flex-shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                    <span>PRINTING</span>
-                  </span>
+                <div className="flex items-center space-x-2 text-xs font-bold">
+                  <Printer className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                  <span>Shop reviews order status</span>
                 </div>
-
-                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 h-full rounded-full w-full animate-pulse" />
-                </div>
+                <p className="text-[11px] leading-relaxed text-slate-300">UPI references are manually verified by the shop. Agent status reflects reported spooler progress.</p>
               </div>
 
               {/* Floating Status Badges */}
               <div className="flex flex-wrap gap-2 pt-1">
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                  ⚡ Auto Print
+                  ✓ Shop-configured options
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  ✓ Payment Verified
+                  ✓ Server-calculated price
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-200">
                   🖨 Windows Printer
@@ -864,7 +771,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <Sparkles className="w-4 h-4" />
               </div>
               <div className="font-bold text-xs sm:text-sm text-[#080B20]">Smart Printing</div>
-              <div className="text-[11px] text-slate-500 leading-relaxed">Instant contactless browser experience for any smartphone.</div>
+              <div className="text-[11px] text-slate-500 leading-relaxed">Open the shop’s QR page in a supported mobile browser.</div>
             </div>
 
             <div className="space-y-1">
@@ -872,15 +779,15 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <Laptop className="w-4 h-4" />
               </div>
               <div className="font-bold text-xs sm:text-sm text-[#080B20]">Windows Printers</div>
-              <div className="text-[11px] text-slate-500 leading-relaxed">Compatible with HP, Canon, Epson, Brother &amp; Xerox.</div>
+              <div className="text-[11px] text-slate-500 leading-relaxed">Uses printers installed and selected on the shop’s Windows computer.</div>
             </div>
 
             <div className="space-y-1">
               <div className="w-8 h-8 rounded-xl bg-pink-50 text-pink-700 flex items-center justify-center font-bold">
                 <WifiOff className="w-4 h-4" />
               </div>
-              <div className="font-bold text-xs sm:text-sm text-[#080B20]">No Wi-Fi Needed</div>
-              <div className="text-[11px] text-slate-500 leading-relaxed">Works seamlessly with standard USB &amp; LAN desktop printers.</div>
+              <div className="font-bold text-xs sm:text-sm text-[#080B20]">Shop Agent Connection</div>
+              <div className="text-[11px] text-slate-500 leading-relaxed">The shop’s paired Windows Agent must be available to receive jobs.</div>
             </div>
 
             <div className="space-y-1">
@@ -888,7 +795,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <Palette className="w-4 h-4" />
               </div>
               <div className="font-bold text-xs sm:text-sm text-[#080B20]">B&amp;W &amp; Color</div>
-              <div className="text-[11px] text-slate-500 leading-relaxed">Smart multi-machine routing handles color &amp; duplex jobs.</div>
+              <div className="text-[11px] text-slate-500 leading-relaxed">Available print settings depend on this shop’s printer capabilities.</div>
             </div>
 
             <div className="col-span-2 sm:col-span-1 space-y-1">
@@ -896,7 +803,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <Timer className="w-4 h-4" />
               </div>
               <div className="font-bold text-xs sm:text-sm text-[#080B20]">Setup in Minutes</div>
-              <div className="text-[11px] text-slate-500 leading-relaxed">Install lightweight agent once. Start printing immediately.</div>
+              <div className="text-[11px] text-slate-500 leading-relaxed">Setup depends on the shop’s account, agent, printer and network.</div>
             </div>
           </div>
         </div>
@@ -975,7 +882,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       }
 
       {/* 7. CUSTOMER TESTIMONIALS */}
-      <section className="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      {testimonials.length > 0 && <section className="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto space-y-2 mb-10">
           <h2 className="text-2xl sm:text-3xl font-black text-[#080B20] flex items-center justify-center space-x-2">
             <span>⭐ What Shop Owners Say</span>
@@ -1008,7 +915,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
           ))}
         </div>
-      </section>
+      </section>}
 
       {/* 8. COMPLETE SHOP SYSTEM SECTION */}
       <section id="features" className="scroll-mt-24 md:scroll-mt-28 py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
@@ -1026,14 +933,14 @@ export const HomePage: React.FC<HomePageProps> = ({
           <div className="flex flex-wrap gap-2">
             {[
               'QR Printing',
-              'Automatic Printing',
+              'Agent print queue',
               'PDF Printing',
               'Image Printing',
               'Color Printing',
               'B&W Printing',
               'Duplex Printing',
               'Custom Pricing',
-              'Multiple Printers',
+              'Printer selection',
               'Print Queue',
               'Payment Management',
               'Staff Management',
@@ -1077,49 +984,56 @@ export const HomePage: React.FC<HomePageProps> = ({
               </h2>
 
               <p className="text-xs text-slate-300 leading-relaxed">
-                The AnishNova Windows Print Agent (PrintQRAgent.exe) bridges your physical desktop printers directly with your online customer queue. It features a one-time installer with in-place silent updates.
+                Pair the Windows Print Agent with your shop and select a printer installed on that computer. Release version and download availability are checked from the API.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">
                   <div className="font-bold text-white flex items-center space-x-1.5">
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>One-Time Setup</span>
+                    <span>Shop pairing</span>
                   </div>
-                  <p className="text-slate-400 text-[11px]">Install once. In-place automatic updates download seamlessly in background.</p>
+                  <p className="text-slate-400 text-[11px]">Use the short-lived pairing code shown in the Shop Dashboard.</p>
                 </div>
 
                 <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">
                   <div className="font-bold text-white flex items-center space-x-1.5">
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Native Spooler Handshake</span>
+                    <span>Windows print queue</span>
                   </div>
-                  <p className="text-slate-400 text-[11px]">Direct integration with Windows Print Spooler and hardware driver queues.</p>
+                  <p className="text-slate-400 text-[11px]">The agent reports the status available from Windows and the server.</p>
                 </div>
               </div>
 
               <div className="pt-2">
-                <a
-                  href={`${API_BASE_URL}/admin/agents/download/binary/latest`}
-                  className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 hover:opacity-95 text-white font-bold text-xs shadow-lg shadow-purple-500/25 flex items-center space-x-2 inline-flex transition-all min-h-[48px]"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Windows Agent (.exe)</span>
-                </a>
+                {agentRelease ? (
+                  <a
+                    href={`${API_BASE_URL}/admin/agents/download/latest`}
+                    className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 hover:opacity-95 text-white font-bold text-xs shadow-lg shadow-purple-500/25 flex items-center space-x-2 inline-flex transition-all min-h-[48px]"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Windows Agent v{agentRelease.latestVersion} installer</span>
+                  </a>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3 text-xs" aria-live="polite">
+                    <span className="text-slate-300">{agentReleaseError || 'Checking available Windows Agent release…'}</span>
+                    {agentReleaseError && <button type="button" onClick={() => setAgentReleaseRetry((value) => value + 1)} className="underline font-bold text-purple-300">Retry</button>}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="lg:col-span-5 w-full">
               <div className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 shadow-xl font-mono text-xs space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="text-purple-400 font-bold">AnishNova Print Agent v1.0.0</span>
-                  <span className="text-emerald-400 text-[10px] font-bold">● ACTIVE &amp; PAIRED</span>
+                  <span className="text-purple-400 font-bold">AnishNova Print Agent</span>
+                  <span className="text-slate-400 text-[10px] font-bold">VERSION FROM RELEASE API</span>
                 </div>
                 <div className="space-y-1.5 text-slate-300 text-[11px]">
-                  <div>Store: <strong>ABC Digital Print Hub</strong></div>
-                  <div>Printers: <strong>HP LaserJet Pro, Canon Pixma, Epson</strong></div>
-                  <div>Spooler Queue: <strong>0 Pending Jobs (Ready)</strong></div>
-                  <div>Socket Engine: <strong>Connected (WebSocket ws://)</strong></div>
+                  <div>Version: <strong>{agentRelease?.latestVersion || 'Unavailable'}</strong></div>
+                  <div>Connection: <strong>Reported by the installed agent</strong></div>
+                  <div>Shop and printer: <strong>Shown after pairing in the dashboard</strong></div>
+                  <div>Print completion: <strong>Physical output is not inferred from queue acceptance</strong></div>
                 </div>
               </div>
             </div>
@@ -1158,12 +1072,12 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="w-8 h-8 rounded-xl bg-purple-600 mx-auto flex items-center justify-center text-white font-bold text-xs">
                   <Printer className="w-4 h-4" />
                 </div>
-                <div className="font-black text-xs text-[#080B20]">ABC Digital Print</div>
+                <div className="font-black text-xs text-[#080B20]">Your shop name</div>
                 <div className="p-3 bg-slate-900 rounded-xl inline-block text-white">
-                  <QrCode className="w-20 h-20 sm:w-24 sm:h-24 text-white mx-auto" />
+                  <QrCode className="w-20 h-20 sm:w-24 sm:h-24 text-white mx-auto" aria-hidden="true" />
                 </div>
                 <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
-                  SCAN • UPLOAD • PAY • PRINT
+                  Illustrative preview · not a scannable shop QR
                 </div>
               </div>
             </div>
@@ -1177,9 +1091,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           <h2 className="text-2xl sm:text-4xl font-black text-[#080B20] flex items-center justify-center space-x-2">
             <span>💰 Choose Your Plan</span>
           </h2>
-          <p className="text-xs text-slate-600">
-            Transparent plans designed for Indian print shop economics. Upgrade or cancel anytime.
-          </p>
+          <p className="text-xs text-slate-600">Plan names, prices and included features are loaded from the published subscription configuration.</p>
 
           {/* Monthly / Yearly Billing Toggle */}
           <div className="inline-flex items-center p-1 rounded-2xl bg-white border border-slate-200 text-xs font-bold shadow-xs mt-2">
@@ -1200,16 +1112,21 @@ export const HomePage: React.FC<HomePageProps> = ({
               }`}
             >
               <span>Annual Billing</span>
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
-                SAVE 20%
-              </span>
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {plans.map((plan) => {
-            const price = billingCycle === 'monthly' ? plan.priceMonthly : Math.round(plan.priceYearly / 12);
+          {plansLoading ? (
+            <div className="md:col-span-3 rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600" role="status">Loading current plans…</div>
+          ) : plansError ? (
+            <div className="md:col-span-3 rounded-2xl border border-rose-200 bg-white p-6 text-center text-sm text-rose-700" role="alert">
+              <p>{plansError}</p>
+              <button type="button" onClick={() => setPlansRetry((value) => value + 1)} className="mt-3 rounded-xl bg-slate-900 px-4 py-2 font-bold text-white">Retry pricing</button>
+            </div>
+          ) : plans.map((plan) => {
+            const price = Number(billingCycle === 'monthly' ? plan.priceMonthly : plan.priceYearly);
+            const priceLabel = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(price);
             return (
               <div
                 key={plan.id}
@@ -1232,8 +1149,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </div>
 
                   <div className="flex items-baseline space-x-1">
-                    <span className="text-3xl sm:text-4xl font-black text-[#080B20] font-mono">₹{price}</span>
-                    <span className="text-xs text-slate-500 font-semibold">/ month</span>
+                    <span className="text-3xl sm:text-4xl font-black text-[#080B20] font-mono">₹{priceLabel}</span>
+                    <span className="text-xs text-slate-500 font-semibold">/ {billingCycle === 'monthly' ? 'month' : 'year'}</span>
                   </div>
 
                   <div className="border-t border-slate-100 pt-4 space-y-2.5 text-xs text-slate-700">
@@ -1463,7 +1380,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div>
                 <h3 className="font-bold text-base text-[#080B20]">Contact AnishNova Technologies</h3>
-                <p className="text-[11px] text-slate-500">We respond to counter &amp; business enquiries within 2 hours.</p>
+                <p className="text-[11px] text-slate-500">Send a message to the AnishNova Print team.</p>
               </div>
               <button
                 type="button"
@@ -1475,13 +1392,11 @@ export const HomePage: React.FC<HomePageProps> = ({
               </button>
             </div>
 
-            {contactLeadId ? (
+              {contactLeadId ? (
               <div className="p-6 text-center text-emerald-700 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-2">
                 <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-600" />
                 <div className="font-bold text-base">Enquiry Registered Successfully!</div>
-                <p className="text-xs text-slate-600">
-                  Your Lead Reference ID is <strong className="font-mono text-purple-700">{contactLeadId}</strong>.
-                </p>
+                {contactLeadId !== 'submitted' && <p className="text-xs text-slate-600">Your Lead Reference ID is <strong className="font-mono text-purple-700">{contactLeadId}</strong>.</p>}
                 <p className="text-[11px] text-slate-500">Our customer success and technical team will contact you shortly.</p>
                 <button
                   type="button"
@@ -1594,6 +1509,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </>
                   )}
                 </button>
+                {contactError && <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700" role="alert">{contactError}</p>}
               </form>
             )}
           </div>
@@ -1623,10 +1539,8 @@ export const HomePage: React.FC<HomePageProps> = ({
               <div className="p-6 text-center text-emerald-700 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-2">
                 <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-600" />
                 <div className="font-bold text-base">Application Received!</div>
-                <p className="text-xs text-slate-600">
-                  Your Partner Reference ID is <strong className="font-mono text-purple-700">{partnerLeadId}</strong>.
-                </p>
-                <p className="text-[11px] text-slate-500">Our partnership director will contact you within 24 hours.</p>
+                {partnerLeadId !== 'submitted' && <p className="text-xs text-slate-600">Your Partner Reference ID is <strong className="font-mono text-purple-700">{partnerLeadId}</strong>.</p>}
+                <p className="text-[11px] text-slate-500">The team will follow up using the contact details you provided.</p>
                 <button
                   type="button"
                   onClick={() => setShowPartnerModal(false)}
@@ -1765,6 +1679,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </>
                   )}
                 </button>
+                {partnerError && <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700" role="alert">{partnerError}</p>}
               </form>
             )}
           </div>

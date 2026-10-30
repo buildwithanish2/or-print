@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
 import { WebSocketService } from '../services/socket.service';
 import { getApiBaseUrl } from '@printqr/config';
-import { agentReleaseMetadata, canAgentReportStatus, canDispatchPrintJob } from '../services/agent-artifact.service';
+import { AGENT_JOB_IN_FLIGHT_STATUSES, agentReleaseMetadata, canAgentReportStatus, canDispatchPrintJob, getStaleAgentJobCutoff, isAgentStatusReportIdempotent } from '../services/agent-artifact.service';
 import { storageService } from '../services/storage.service';
 import fs from 'fs';
 import { APP_CONFIG } from '@printqr/config';
@@ -83,6 +83,43 @@ export class AgentController {
     try {
       const agent = await AgentController.authenticateAgent(req);
       if (!agent) return res.status(401).json({ success: false, message: 'Valid agent credential required' });
+
+      // A stale claim is never silently requeued: the disconnected agent may
+      // have reached the printer. Mark it for operator review to prevent a
+      // second physical copy from being produced automatically.
+      const staleCutoff = getStaleAgentJobCutoff();
+      const staleClaimPredicate = { OR: [{ startedAt: { lt: staleCutoff } }, { startedAt: null }] };
+      const staleClaims = await prisma.printJob.findMany({
+        where: { shopId: agent.shopId, status: { in: [...AGENT_JOB_IN_FLIGHT_STATUSES] }, ...staleClaimPredicate },
+        select: { id: true, orderId: true, status: true },
+      });
+      for (const stale of staleClaims) {
+        const recovery = await prisma.$transaction(async (tx: any) => {
+          const changed = await tx.printJob.updateMany({
+            where: { id: stale.id, shopId: agent.shopId, status: stale.status, ...staleClaimPredicate },
+            data: {
+              status: 'FAILED',
+              errorMessage: 'The agent stopped reporting while this job was claimed. Physical output is unknown; inspect the printer before manually retrying.',
+            },
+          });
+          if (changed.count !== 1) return null;
+
+          const jobs = await tx.printJob.findMany({ where: { orderId: stale.orderId } });
+          const allTerminal = jobs.every((job: any) => ['COMPLETED', 'FAILED'].includes(job.status));
+          const anyFailed = jobs.some((job: any) => job.status === 'FAILED');
+          if (allTerminal && anyFailed) {
+            await tx.order.update({ where: { id: stale.orderId }, data: { printStatus: 'FAILED', completedAt: null } });
+          }
+          const [job, order] = await Promise.all([
+            tx.printJob.findUnique({ where: { id: stale.id } }),
+            tx.order.findUnique({ where: { id: stale.orderId } }),
+          ]);
+          return { job, order };
+        });
+        if (recovery?.job) WebSocketService.broadcastJobStatus(recovery.job);
+        if (recovery?.order) WebSocketService.broadcastOrderUpdate(recovery.order.orderNumber, recovery.order.shopId, recovery.order);
+      }
+
       const jobs = await prisma.printJob.findMany({
         where: {
           shopId: agent.shopId,
@@ -341,6 +378,13 @@ export class AgentController {
       if (agent.shopId !== printJob.shopId) {
         return res.status(403).json({ success: false, message: 'Agent is not authorized for this print job' });
       }
+      if (isAgentStatusReportIdempotent(printJob.status, status)) {
+        return res.status(200).json({
+          success: true,
+          message: `Job status ${status} was already recorded`,
+          data: { job: printJob, order: printJob.order },
+        });
+      }
       if (!['PAID', 'NOT_REQUIRED'].includes(printJob.order.paymentStatus) || ['CANCELLED', 'COMPLETED'].includes(printJob.order.printStatus)) {
         return res.status(409).json({ success: false, message: 'This order is not currently authorized for printing.' });
       }
@@ -356,6 +400,7 @@ export class AgentController {
           progressPercent,
           errorMessage: errorMessage || null,
           completedAt: null,
+          startedAt: new Date(),
         },
       });
 

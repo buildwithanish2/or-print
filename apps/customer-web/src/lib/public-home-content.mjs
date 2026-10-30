@@ -1,8 +1,8 @@
 const isUsefulText = (value, minimumLength = 2) => typeof value === 'string'
   && value.trim().length >= minimumLength;
 
-export function resolvePublicPlans(apiPlans, fallbackPlans) {
-  if (!Array.isArray(apiPlans)) return fallbackPlans;
+export function resolvePublicPlans(apiPlans) {
+  if (!Array.isArray(apiPlans)) return [];
 
   const validPlans = apiPlans.filter((plan) => {
     if (!plan || !isUsefulText(plan.name) || !isUsefulText(plan.description, 10)) return false;
@@ -12,7 +12,18 @@ export function resolvePublicPlans(apiPlans, fallbackPlans) {
     return !plan.name.toLowerCase().includes('demo');
   });
 
-  return validPlans.length > 0 ? validPlans : fallbackPlans;
+  return validPlans;
+}
+
+export function resolveAgentRelease(response) {
+  const release = response?.data?.data;
+  if (!response?.data?.success || !release || typeof release.latestVersion !== 'string'
+    || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(release.latestVersion)
+    || typeof release.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(release.sha256)
+    || !Number.isSafeInteger(release.fileSize) || release.fileSize <= 0) {
+    throw new Error('The Windows Agent release information is invalid. Retry or contact support.');
+  }
+  return release;
 }
 
 export function resolvePublicNavigation(apiItems, fallbackItems) {

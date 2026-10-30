@@ -46,6 +46,17 @@ export function canAgentReportStatus(currentStatus: string, nextStatus: string) 
   return false;
 }
 
+export const AGENT_JOB_CLAIM_LEASE_MS = 15 * 60 * 1000;
+export const AGENT_JOB_IN_FLIGHT_STATUSES = ['DOWNLOADING', 'PRINTING', 'SENT_TO_SPOOLER'] as const;
+
+export function getStaleAgentJobCutoff(now = new Date()): Date {
+  return new Date(now.getTime() - AGENT_JOB_CLAIM_LEASE_MS);
+}
+
+export function isAgentStatusReportIdempotent(currentStatus: string, nextStatus: string): boolean {
+  return currentStatus === nextStatus && ['DOWNLOADING', 'SENT_TO_SPOOLER', 'PRINTING', 'FAILED'].includes(nextStatus);
+}
+
 const DOWNLOADS_DIR = path.resolve(__dirname, '../../public/downloads');
 const MINIMUM_EXECUTABLE_SIZE = 1024 * 1024;
 
