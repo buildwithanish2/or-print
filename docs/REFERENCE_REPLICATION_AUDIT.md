@@ -26,7 +26,7 @@ The reference's page shell advertises several separate products (WhatsApp printi
 
 The public shell has desktop navigation for Home, Pricing, How to Setup, Feature, About, Contact, Partner Program, Declaration and Shop Owner Login, plus a mobile navigation variant and promotional banners. The landing page order observed is product/hero, product/device choice, setup video, plans, WhatsApp product, Android product, cyber-cafe product, reviews, broader feature list, privacy/operations content, FAQs and footer. The `/requirements` flow collects shop/contact/plan details and explains WhatsApp pairing and print setup. The accessible content exposes no authenticated shop dashboard or customer transaction; those parts were not exercised.
 
-**Visual evidence limitation:** the reference could be inspected for rendered text, links and navigation, but this environment did not provide a connected browser screenshot/capture runtime or a supported local browser automation target. Therefore no viewport screenshots, pixel measurements, mobile interaction replay, or pixel-perfect comparison are claimed. The submitted screenshots remain the only screenshot evidence in this task.
+**Visual evidence and scope:** the reference homepage and its narrow, tablet and desktop layouts were captured during this work using the available controlled browser runtime. Local Customer Web, Shop Dashboard and Admin entry screens were also captured at desktop and mobile widths. The reference is a public marketing/product site; it does not expose an equivalent authenticated shop or super-admin console. Those PrintQ consoles therefore remain purpose-built operational applications, and are not represented as pixel replicas of unrelated reference pages. Screenshot captures are visual review evidence from the session and are not committed as production assets. Exact pixel equality has not been measured.
 
 ## PrintQ architecture and workflow map
 
@@ -87,6 +87,7 @@ The repository is an npm-workspaces monorepo (`apps/*`, `packages/*`) with share
 | Testimonials and statistics | Public APIs | Testimonials only appear when returned by API; statistics show unavailable markers instead of invented values |
 | Contact and partner forms | Existing lead APIs in `HomePage` | Success only follows an API success response; network/API errors are shown, not replaced with fabricated reference numbers |
 | Windows agent download | Agent release metadata endpoint | Version comes from validated API manifest; failed/invalid metadata shows unavailable with retry, no `1.0.0` fallback |
+| Customer header navigation | Customer Web `HomePage` | This stage removes duplicate Contact/Partner actions when those destinations already exist in API-configured navigation, keeps them available when omitted, tightens desktop spacing and corrects the repeated “from” in the hero headline |
 | WhatsApp print product | No verified equivalent identified in PrintQ source | Not copied or represented as implemented |
 | Android print app | No verified Android app in this monorepo | Not copied or represented as implemented |
 | Offline cyber-cafe suite | No verified equivalent in this monorepo | Not copied or represented as implemented |
@@ -94,7 +95,7 @@ The repository is an npm-workspaces monorepo (`apps/*`, `packages/*`) with share
 | Referral / white-label pages | PrintQ has partner-related code but not verified parity with reference mechanics | Existing PrintQ partner flow retained; no external payout or white-label capability invented |
 | Feature detail / about / declaration | PrintQ's landing sections and legal routes | No pixel-level page parity verified; separate reference URLs mostly return the same shell, while reference product claims are not adopted without source evidence |
 
-Exact geometry, font rendering, colors, spacing, icon shapes, image positions and breakpoint behavior cannot be certified as matching because screenshot capture was unavailable. The source uses responsive Tailwind layouts, but this does not substitute for multi-viewport visual QA.
+Screenshots confirm the broad responsive hierarchy, but exact geometry, font rendering, color values, icon shapes and image positioning have not been measured against the reference. The Customer Web is the closest visual counterpart; the Shop and Admin portals have no matching authenticated reference screens. This code stage addresses the confirmed duplicate-navigation and spacing defect, not a claim of pixel-perfect replication.
 
 ## Confirmed findings and prioritized changes
 
@@ -113,7 +114,7 @@ Exact geometry, font rendering, colors, spacing, icon shapes, image positions an
 
 ### P2 — design and product parity backlog
 
-1. Capture reference and PrintQ screenshots using a real browser at 360/390/768/1440 widths and compare side-by-side before making pixel-specific adjustments.
+1. Continue screenshot comparisons for reference and PrintQ at mobile, tablet and desktop widths; the next visual pass should focus on measured section widths, hero composition, product cards and footer spacing.
 2. Decide whether PrintQ should build separate WhatsApp, Android, offline cyber-cafe, international pricing, referral payout or white-label products. The current code does not provide verified parity for these and they require product/security/payment decisions.
 3. Test complete flows with a sandbox shop/account and a Windows host. Run physical test jobs only through an explicitly authorized test order and printer.
 
@@ -132,4 +133,4 @@ Automated checks run on this branch:
 - `git diff --check`: passed (Git reports only line-ending normalization warnings for the existing README and the changed test file).
 - Root `npm run type-check` and root `npm run build`: blocked at `prisma generate` by Windows `EPERM` renaming the SQLite query-engine DLL in the shared `node_modules/.prisma/client` path. The shared package builds preceding this step passed. The API compiler/build passed using the already generated client. Existing running Node processes were left undisturbed.
 
-Not verified in this environment: pixel screenshots at requested viewport sizes, real production shop/order/payment behavior, authenticated user sessions, Windows multi-printer discovery, actual printer output, Vercel deployment and live API data. No live payment, production order or deployment was initiated.
+Not verified in this environment: exact pixel measurements, production shop/order/payment behavior, authenticated shop/admin sessions, Windows multi-printer discovery, actual printer output, Vercel deployment and live API data. No live payment, production order or deployment was initiated.

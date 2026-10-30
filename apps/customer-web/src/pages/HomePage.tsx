@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_URL, SHOP_PORTAL_URL } from '../lib/api';
-import { resolveAgentRelease, resolvePublicNavigation, resolvePublicPlans } from '../lib/public-home-content.mjs';
+import { hasPublicNavigationTopic, resolveAgentRelease, resolvePublicNavigation, resolvePublicPlans } from '../lib/public-home-content.mjs';
 import {
   Printer,
   Home,
@@ -387,6 +387,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   };
 
   const navigationItems = publicNavigation ?? DEFAULT_PUBLIC_NAVIGATION;
+  const hasContactLink = hasPublicNavigationTopic(navigationItems, 'contact');
+  const hasPartnerLink = hasPublicNavigationTopic(navigationItems, 'partner');
   const banner = homepageBanners === null ? undefined : homepageBanners[0];
   const handlePublicNavigation = (event: React.MouseEvent<HTMLAnchorElement>, item: any) => {
     if (!item.isExternal && typeof item.path === 'string' && item.path.startsWith('#')) {
@@ -434,9 +436,9 @@ export const HomePage: React.FC<HomePageProps> = ({
           </a>
 
           {/* Desktop Navigation Links (> 768px / lg) */}
-          <nav className="hidden lg:flex items-center space-x-7 text-xs font-bold text-slate-700">
+          <nav className="hidden lg:flex min-w-0 items-center gap-3 xl:gap-4 text-[11px] xl:text-xs font-bold text-slate-700 whitespace-nowrap">
             {navigationItems.map((item: any) => <a key={item.id} href={safePublicLink(item.path, Boolean(item.isExternal))} target={item.isExternal && item.openInNewTab ? '_blank' : undefined} rel={item.isExternal && item.openInNewTab ? 'noopener noreferrer' : undefined} onClick={(event) => handlePublicNavigation(event, item)} className="hover:text-purple-600 transition-colors">{item.label}</a>)}
-            <button
+            {!hasContactLink && <button
               type="button"
               onClick={() => {
                 setContactLeadId(null);
@@ -445,12 +447,12 @@ export const HomePage: React.FC<HomePageProps> = ({
               className="hover:text-purple-600 transition-colors"
             >
               Contact
-            </button>
+            </button>}
           </nav>
 
           {/* Desktop Action CTAs (> 768px / lg) */}
-          <div className="hidden lg:flex items-center space-x-3">
-            <button
+          <div className="hidden lg:flex shrink-0 items-center gap-2">
+            {!hasPartnerLink && <button
               type="button"
               onClick={() => {
                 setPartnerLeadId(null);
@@ -459,7 +461,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 hover:text-[#080B20] hover:bg-slate-100 transition-all border border-slate-200"
             >
               Partner Program
-            </button>
+            </button>}
             <a
               href={`${SHOP_PORTAL_URL}/login`}
               className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 hover:text-[#080B20] hover:bg-slate-100 transition-all border border-slate-200"
@@ -548,7 +550,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </a>
           );})}
 
-          <button
+          {!hasPartnerLink && <button
             type="button"
             onClick={() => {
               setMobileMenuOpen(false);
@@ -566,9 +568,9 @@ export const HomePage: React.FC<HomePageProps> = ({
               </span>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-600 transition-colors" />
-          </button>
+          </button>}
 
-          <button
+          {!hasContactLink && <button
             type="button"
             onClick={() => {
               setMobileMenuOpen(false);
@@ -586,7 +588,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </span>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-600 transition-colors" />
-          </button>
+          </button>}
         </div>
 
         {/* Drawer Bottom Actions & Clean Attribution */}
@@ -628,7 +630,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
 
             <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-[#080B20] tracking-tight leading-[1.12]">
-              Print Documents from <br />
+              Print Documents <br />
               <span className="bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 bg-clip-text text-transparent">
                 From Your Phone to the Shop
               </span>
