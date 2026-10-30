@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_URL, SHOP_PORTAL_URL } from '../lib/api';
+import { resolvePublicNavigation, resolvePublicPlans } from '../lib/public-home-content.mjs';
 import {
   Printer,
   Home,
@@ -309,12 +310,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     fetch(`${API_BASE_URL}/plans/public`)
       .then((r) => r.json())
       .then((res) => {
-        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-          const filtered = res.data.filter(
-            (p: any) => !p.name.toLowerCase().includes('demo')
-          );
-          if (filtered.length > 0) setPlans(filtered);
-        }
+        if (res.success) setPlans(resolvePublicPlans(res.data, DEFAULT_SAAS_PLANS));
       })
       .catch(() => {});
 
@@ -363,7 +359,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     fetch(`${API_BASE_URL}/navigation/public`, { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('Navigation request failed')))
       .then((res) => {
-        if (res?.success && Array.isArray(res.data)) setPublicNavigation(res.data);
+        if (res?.success) setPublicNavigation(resolvePublicNavigation(res.data, DEFAULT_PUBLIC_NAVIGATION));
       })
       .catch(() => {});
 
