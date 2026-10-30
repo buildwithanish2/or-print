@@ -89,8 +89,13 @@ export const LiveQueuePage: React.FC = () => {
   };
 
   const handleRetryJob = async (jobId: string) => {
+    const confirmed = window.confirm(
+      'This job may have reached the printer before communication stopped. Check the printer and printed pages first. Retry only if you confirm no duplicate output; an uncertain prior print could otherwise be repeated.',
+    );
+    if (!confirmed) return;
+
     try {
-      await api.post(`/orders/jobs/${jobId}/retry`);
+      await api.post(`/orders/jobs/${jobId}/retry`, { confirmPhysicalOutputReviewed: true });
       fetchQueue();
     } catch (err: any) {
       alert(err.message || 'Failed to retry job');
@@ -282,15 +287,22 @@ export const LiveQueuePage: React.FC = () => {
                       <Check className="w-4 h-4" />
                       <span>Mark Paid &amp; Print</span>
                     </button>
-                  ) : (
+                  ) : order.printJobs?.some((job) => job.status === 'FAILED' && job.attempts < job.maxAttempts) ? (
                     <button
                       type="button"
-                      onClick={() => order.printJobs?.[0] && handleRetryJob(order.printJobs[0].id)}
+                      onClick={() => {
+                        const failedJob = order.printJobs?.find((job) => job.status === 'FAILED' && job.attempts < job.maxAttempts);
+                        if (failedJob) void handleRetryJob(failedJob.id);
+                      }}
                       className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md shadow-blue-500/20 flex items-center space-x-1.5 transition-all"
                     >
                       <Printer className="w-4 h-4" />
-                      <span>Print Now</span>
+                      <span>Retry after checking output</span>
                     </button>
+                  ) : (
+                    <span className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400">
+                      {order.printStatus === 'FAILED' ? 'Retry limit reached' : `Print ${order.printStatus.toLowerCase().replace(/_/g, ' ')}`}
+                    </span>
                   )}
                 </div>
               </div>

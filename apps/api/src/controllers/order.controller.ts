@@ -548,6 +548,7 @@ export class OrderController {
         include: {
           order: true,
           orderItem: { include: { file: true } },
+          printer: true,
         },
       });
 
@@ -555,29 +556,80 @@ export class OrderController {
       if (!['SUPER_ADMIN', 'ADMIN'].includes(req.user?.role || '') && job.shopId !== req.user?.shopId) {
         return res.status(403).json({ success: false, message: 'You are not authorized to manage this print job' });
       }
+      if (req.body?.confirmPhysicalOutputReviewed !== true) {
+        return res.status(400).json({ success: false, message: 'Check the printer output and confirm before retrying this job.' });
+      }
       if (job.status !== 'FAILED' || job.attempts >= job.maxAttempts) {
         return res.status(409).json({ success: false, message: 'Only failed jobs with retries remaining can be retried' });
+      }
+      if (!['PAID', 'NOT_REQUIRED'].includes(job.order.paymentStatus)
+        || ['CANCELLED', 'COMPLETED'].includes(job.order.printStatus)) {
+        return res.status(409).json({ success: false, message: 'This order is not currently authorized for printing.' });
+      }
+      if (job.printer.shopId !== job.shopId || job.printer.status !== 'ONLINE') {
+        return res.status(409).json({ success: false, message: 'The assigned printer is unavailable. Bring it online before retrying.' });
+      }
+      if (!job.orderItem?.file) {
+        return res.status(409).json({ success: false, message: 'The source document is unavailable; create a new order after checking the file.' });
       }
       const freeReservation = await prisma.freePrintReservation.findUnique({ where: { orderId: job.orderId } });
       if (freeReservation && freeReservation.status !== 'RESERVED') {
         return res.status(409).json({ success: false, message: 'This free-print allowance was already reconciled. Create a new order so current eligibility and limits can be checked again.' });
       }
 
-      const updatedJob = await prisma.printJob.update({
-        where: { id: jobId },
-        data: {
-          status: 'QUEUED',
-          progressPercent: 0,
-          errorMessage: null,
-          attempts: job.attempts + 1,
-        },
+      const retry = await prisma.$transaction(async (tx) => {
+        const changed = await tx.printJob.updateMany({
+          where: {
+            id: jobId,
+            shopId: job.shopId,
+            status: 'FAILED',
+            attempts: job.attempts,
+            order: {
+              paymentStatus: { in: ['PAID', 'NOT_REQUIRED'] },
+              printStatus: { notIn: ['CANCELLED', 'COMPLETED'] },
+            },
+            printer: { shopId: job.shopId, status: 'ONLINE' },
+          },
+          data: {
+            status: 'QUEUED',
+            progressPercent: 0,
+            errorMessage: null,
+            attempts: { increment: 1 },
+            // Keep the retry's idempotency key in the database so both the
+            // WebSocket and durable polling paths deliver the same new attempt.
+            idempotencyKey: `${job.idempotencyKey}_retry_${job.attempts + 1}`,
+            startedAt: null,
+            completedAt: null,
+          },
+        });
+        if (changed.count !== 1) return null;
+
+        await tx.order.updateMany({
+          where: {
+            id: job.orderId,
+            paymentStatus: { in: ['PAID', 'NOT_REQUIRED'] },
+            printStatus: { notIn: ['CANCELLED', 'COMPLETED'] },
+          },
+          data: { printStatus: 'QUEUED', completedAt: null },
+        });
+
+        const [updatedJob, updatedOrder] = await Promise.all([
+          tx.printJob.findUnique({ where: { id: jobId } }),
+          tx.order.findUnique({
+            where: { id: job.orderId },
+            include: { items: { include: { file: true } }, printJobs: { include: { printer: true } } },
+          }),
+        ]);
+        return updatedJob && updatedOrder ? { job: updatedJob, order: updatedOrder } : null;
       });
+      if (!retry) return res.status(409).json({ success: false, message: 'This job changed while retrying. Refresh the queue before trying again.' });
+      const { job: updatedJob, order: updatedOrder } = retry;
 
       if (job.orderItem && job.orderItem.file) {
         WebSocketService.dispatchPrintJob({
           id: updatedJob.id,
-          orderId: job.order.id,
-          orderNumber: job.order.orderNumber,
+          orderId: updatedOrder.id,
+          orderNumber: updatedOrder.orderNumber,
           orderItemId: job.orderItemId,
           shopId: job.shopId,
           printerId: job.printerId,
@@ -595,7 +647,7 @@ export class OrderController {
             quality: job.orderItem.quality as any,
             selectedPagesCount: job.orderItem.selectedPagesCount,
           },
-          idempotencyKey: `${job.idempotencyKey}_retry_${Date.now()}`,
+          idempotencyKey: updatedJob.idempotencyKey,
           status: 'QUEUED',
           progressPercent: 0,
           attempts: updatedJob.attempts,
@@ -604,9 +656,12 @@ export class OrderController {
         });
       }
 
+      WebSocketService.broadcastJobStatus(updatedJob);
+      WebSocketService.broadcastOrderUpdate(updatedOrder.orderNumber, updatedOrder.shopId, updatedOrder);
+
       return res.status(200).json({
         success: true,
-        message: 'Print job retry queued',
+        message: 'Print job retry queued with a new, persisted attempt key.',
         data: updatedJob,
       });
     } catch (err) {

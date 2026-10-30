@@ -9,11 +9,13 @@ namespace PrintQRAgent.Tests;
 public sealed class AgentConnectionTests
 {
     [Fact]
-    public void PairingEndpointMigratesLoopbackAndNormalizesApiSuffix()
+    public void ProductionEndpointMigratesLoopbackAndNormalizesApiSuffix()
     {
         Assert.Equal(
             "https://api.anishnova.com/api/agents/pair",
-            AgentApiEndpoint.BuildApiUri("http://localhost:5000/api/", "agents/pair").AbsoluteUri);
+            AgentApiEndpoint.BuildApiUri(AgentApiEndpoint.ProductionServerUrl, "agents/pair").AbsoluteUri);
+        Assert.Equal(AgentApiEndpoint.ProductionServerUrl,
+            AgentApiEndpoint.NormalizeServerUrl("http://localhost:5000/api/", allowLocalDevelopment: false));
         Assert.Equal(
             "https://custom.example.test/api/agents/pair",
             AgentApiEndpoint.BuildApiUri("https://custom.example.test/api/", "/api/agents/pair").AbsoluteUri);
@@ -75,7 +77,7 @@ public sealed class AgentConnectionTests
                 """));
         });
         using var http = new HttpClient(handler);
-        var config = new AgentConfig { ServerUrl = "http://localhost:5000/api" };
+        var config = new AgentConfig { ServerUrl = AgentApiEndpoint.ProductionServerUrl };
         var saved = false;
         var client = new AgentPairingClient(config, http, () => saved = true);
 
@@ -142,7 +144,7 @@ public sealed class AgentConnectionTests
             return Task.FromResult(new HttpResponseMessage(status));
         });
         using var http = new HttpClient(handler);
-        var heartbeat = new AgentHeartbeatClient(http, new AgentConfig { ServerUrl = "http://localhost:5000" });
+        var heartbeat = new AgentHeartbeatClient(http, new AgentConfig { ServerUrl = AgentApiEndpoint.ProductionServerUrl });
 
         var result = await heartbeat.SendAsync("agent-secret-for-test", 2, CancellationToken.None);
 
@@ -234,6 +236,31 @@ public sealed class AgentConnectionTests
             Assert.Null(printer.InkLevel);
             Assert.Null(printer.PaperLevel);
         });
+    }
+
+    [Fact]
+    public void ExplicitRetryAttemptCanPassThePersistentAtMostOnceLedgerAfterRestart()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"printq-agent-queue-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var firstAttempt = new PrintJobPayload { Id = "job-1", IdempotencyKey = "order-item-attempt-1" };
+            var firstQueue = new OfflineQueueService(directory);
+            Assert.True(firstQueue.EnqueueJob(firstAttempt));
+            Assert.True(firstQueue.TryBeginPrint(firstAttempt.Id, firstAttempt.IdempotencyKey));
+
+            var restartedQueue = new OfflineQueueService(directory);
+            Assert.False(restartedQueue.EnqueueJob(firstAttempt));
+
+            var explicitlyRetried = new PrintJobPayload { Id = firstAttempt.Id, IdempotencyKey = "order-item-attempt-1_retry_2" };
+            Assert.True(restartedQueue.EnqueueJob(explicitlyRetried));
+            Assert.True(restartedQueue.TryBeginPrint(explicitlyRetried.Id, explicitlyRetried.IdempotencyKey));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
