@@ -171,6 +171,9 @@ export class AgentController {
       if (!Array.isArray(printers)) {
         return res.status(400).json({ success: false, message: 'Printers array is required' });
       }
+      if (printers.length > 200) {
+        return res.status(400).json({ success: false, message: 'No more than 200 printers can be synced at once' });
+      }
 
       const agent = await AgentController.authenticateAgent(req);
       if (!agent) {
@@ -182,7 +185,16 @@ export class AgentController {
       }
 
       for (const p of printers) {
-        if (!p.name) continue;
+        if (!p || p.isVirtual === true || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 128) continue;
+        const connectionType = ['USB', 'NETWORK_IP', 'SHARED_SPOOLER', 'BLUETOOTH', 'LOCAL', 'UNKNOWN'].includes(p.connectionType)
+          ? p.connectionType
+          : 'SHARED_SPOOLER';
+        const printerStatus = ['ONLINE', 'OFFLINE', 'ERROR', 'PAUSED', 'PRINTING'].includes(p.status)
+          ? p.status
+          : 'OFFLINE';
+        const supportedSizes = Array.isArray(p.supportedSizes)
+          ? p.supportedSizes.filter((size: unknown): size is string => typeof size === 'string' && size.length <= 24).join(',').slice(0, 256)
+          : typeof p.supportedSizes === 'string' ? p.supportedSizes.slice(0, 256) : '';
 
         const existing = await prisma.printer.findFirst({
           where: { shopId: targetShopId, name: p.name },
@@ -192,11 +204,14 @@ export class AgentController {
           await prisma.printer.update({
             where: { id: existing.id },
             data: {
-              status: p.status || 'ONLINE',
+              status: printerStatus,
               isDefault: Boolean(p.isDefault),
+              connectionType,
               supportsColor: typeof p.supportsColor === 'boolean' ? p.supportsColor : false,
               supportsDuplex: typeof p.supportsDuplex === 'boolean' ? p.supportsDuplex : false,
-              supportedSizes: Array.isArray(p.supportedSizes) ? p.supportedSizes.join(',') : (typeof p.supportedSizes === 'string' ? p.supportedSizes : ''),
+              supportedSizes,
+              inkLevel: typeof p.inkLevel === 'number' ? p.inkLevel : null,
+              paperLevel: typeof p.paperLevel === 'number' ? p.paperLevel : null,
               lastSeenAt: new Date(),
             },
           });
@@ -205,13 +220,15 @@ export class AgentController {
             data: {
               shopId: targetShopId,
               name: p.name,
-              model: p.model || p.name,
-              connectionType: 'SHARED_SPOOLER',
-              status: p.status || 'ONLINE',
+              model: typeof p.model === 'string' && p.model.length <= 128 ? p.model : p.name,
+              connectionType,
+              status: printerStatus,
               isDefault: Boolean(p.isDefault),
               supportsColor: typeof p.supportsColor === 'boolean' ? p.supportsColor : false,
               supportsDuplex: typeof p.supportsDuplex === 'boolean' ? p.supportsDuplex : false,
-              supportedSizes: Array.isArray(p.supportedSizes) ? p.supportedSizes.join(',') : (typeof p.supportedSizes === 'string' ? p.supportedSizes : ''),
+              supportedSizes,
+              inkLevel: typeof p.inkLevel === 'number' ? p.inkLevel : null,
+              paperLevel: typeof p.paperLevel === 'number' ? p.paperLevel : null,
               lastSeenAt: new Date(),
             },
           });
@@ -275,6 +292,7 @@ export class AgentController {
           mandatory: release.mandatory,
           releaseDate: release.releaseDate,
           channel,
+          signatureRequired: release.signatureRequired === true,
           releaseNotes: release.releaseNotes,
           downloadUrl: `${getApiBaseUrl()}/api/admin/agents/download/binary/latest`,
           sha256: release.binary.sha256,

@@ -25,6 +25,18 @@ namespace PrintQRAgent.Models
         [JsonPropertyName("model")]
         public string Model { get; set; } = string.Empty;
 
+        [JsonPropertyName("driverName")]
+        public string DriverName { get; set; } = string.Empty;
+
+        [JsonPropertyName("portName")]
+        public string PortName { get; set; } = string.Empty;
+
+        [JsonPropertyName("connectionType")]
+        public string ConnectionType { get; set; } = "UNKNOWN";
+
+        [JsonPropertyName("errorState")]
+        public string? ErrorState { get; set; }
+
         [JsonPropertyName("status")]
         public string Status { get; set; } = "ONLINE";
 
@@ -35,22 +47,28 @@ namespace PrintQRAgent.Models
         public bool IsVirtual { get; set; }
 
         [JsonPropertyName("supportsColor")]
-        public bool SupportsColor { get; set; } = true;
+        public bool SupportsColor { get; set; }
 
         [JsonPropertyName("supportsDuplex")]
-        public bool SupportsDuplex { get; set; } = true;
+        public bool SupportsDuplex { get; set; }
 
         [JsonPropertyName("supportedSizes")]
         public List<string> SupportedSizes { get; set; } = new();
 
         [JsonPropertyName("inkLevel")]
-        public int InkLevel { get; set; } = 90;
+        public int? InkLevel { get; set; }
 
         [JsonPropertyName("paperLevel")]
-        public int PaperLevel { get; set; } = 85;
+        public int? PaperLevel { get; set; }
 
-        public string DisplayName => IsDefault ? $"🖨️ {Name} (Default)" : $"🖨️ {Name}";
-        public string StatusBadge => IsVirtual ? "Virtual Spooler" : (Status == "ONLINE" ? "● Ready" : "○ Offline");
+        [JsonIgnore]
+        public bool IsAvailable { get; set; }
+
+        [JsonIgnore]
+        public bool IsPhysical => !IsVirtual;
+
+        public string DisplayName => $"{(IsDefault ? "★ " : "")}{Name} · {StatusBadge}";
+        public string StatusBadge => IsVirtual ? "Virtual" : (Status == "ONLINE" ? "Ready" : "Not ready");
     }
 
     public class PrintJobPayload

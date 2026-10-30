@@ -99,6 +99,14 @@ namespace AnishNovaInstaller
                             throw new InvalidDataException("The embedded agent failed its integrity check. No application files were replaced.");
                         }
                     }
+                    var signatureRequired = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+                        .FirstOrDefault(attribute => attribute.Key == "AgentPayloadSignatureRequired")?.Value == "true";
+                    if (signatureRequired && !PrintQRAgent.Services.AuthenticodeVerifier.IsTrusted(
+                            temporaryAgentPath, "AnishNova Technologies", out var signatureError))
+                    {
+                        File.Delete(temporaryAgentPath);
+                        throw new InvalidDataException(signatureError);
+                    }
                     File.Move(temporaryAgentPath, targetExePath, overwrite: true);
                     App.LogInstallerInfo("Verified embedded Windows agent payload and installed it atomically.");
 

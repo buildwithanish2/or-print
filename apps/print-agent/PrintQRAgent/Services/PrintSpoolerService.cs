@@ -8,6 +8,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using PDFtoImage;
 using PrintQRAgent.Models;
 using SkiaSharp;
@@ -17,6 +18,17 @@ namespace PrintQRAgent.Services
     public class PrintSpoolerService
     {
         private static readonly HttpClient _httpClient = new();
+        private const uint PrinterEnumLocal = 0x00000002;
+        private const uint PrinterEnumConnections = 0x00000004;
+        private const uint PrinterStatusError = 0x00000002;
+        private const uint PrinterStatusPaperJam = 0x00000008;
+        private const uint PrinterStatusPaperOut = 0x00000010;
+        private const uint PrinterStatusOffline = 0x00000080;
+        private const uint PrinterStatusNotAvailable = 0x00001000;
+        private const uint PrinterStatusUserIntervention = 0x00100000;
+        private const uint PrinterStatusDoorOpen = 0x00400000;
+        private const uint PrinterAttributeShared = 0x00000008;
+        private const uint PrinterAttributeNetwork = 0x00000010;
 
         /// <summary>
         /// Checks if Windows Print Spooler subsystem is available and responding
@@ -25,8 +37,8 @@ namespace PrintQRAgent.Services
         {
             try
             {
-                var settings = new PrinterSettings();
-                return settings.IsValid || PrinterSettings.InstalledPrinters.Count >= 0;
+                var ok = EnumPrinters(PrinterEnumLocal | PrinterEnumConnections, null, 4, IntPtr.Zero, 0, out var needed, out _);
+                return ok || Marshal.GetLastWin32Error() == 122 || (needed == 0 && Marshal.GetLastWin32Error() == 0);
             }
             catch (Exception ex)
             {
@@ -36,11 +48,13 @@ namespace PrintQRAgent.Services
         }
 
         /// <summary>
-        /// Discovers all installed local, USB, and network printers in Windows
+        /// Discovers Windows local printers and per-user network connections through the spooler.
+        /// Ink and paper telemetry are deliberately left unset because generic Windows APIs do not
+        /// provide truthful levels for every driver.
         /// </summary>
         public List<DiscoveredPrinter> GetInstalledPrinters()
         {
-            var list = new List<DiscoveredPrinter>();
+            var byName = new Dictionary<string, DiscoveredPrinter>(StringComparer.OrdinalIgnoreCase);
             var defaultPrinterName = string.Empty;
 
             try
@@ -48,44 +62,75 @@ namespace PrintQRAgent.Services
                 var settings = new PrinterSettings();
                 defaultPrinterName = settings.PrinterName;
             }
-            catch { }
+            catch (Exception ex) { LoggerService.LogWarn($"Windows could not identify its default printer: {ex.Message}"); }
+
+            var nativePrinters = TryEnumeratePrinterMetadata(out var enumerationError);
+            if (enumerationError != null)
+                LoggerService.LogWarn($"Windows spooler metadata was incomplete: {enumerationError}");
 
             try
             {
-                foreach (string printerName in PrinterSettings.InstalledPrinters)
+                foreach (var metadata in nativePrinters)
                 {
                     try
                     {
-                        var printerSettings = new PrinterSettings { PrinterName = printerName };
-                        var isOnline = printerSettings.IsValid;
+                        if (string.IsNullOrWhiteSpace(metadata.Name)) continue;
+                        var printerSettings = new PrinterSettings { PrinterName = metadata.Name };
+                        var isVirtual = IsVirtualPrinter(metadata.Name, metadata.DriverName, metadata.PortName);
+                        var flaggedError = GetPrinterError(metadata.StatusFlags);
+                        var available = printerSettings.IsValid && flaggedError == null;
 
-                        var isVirtual = printerName.Contains("PDF", StringComparison.OrdinalIgnoreCase) ||
-                                        printerName.Contains("XPS", StringComparison.OrdinalIgnoreCase) ||
-                                        printerName.Contains("OneNote", StringComparison.OrdinalIgnoreCase) ||
-                                        printerName.Contains("Fax", StringComparison.OrdinalIgnoreCase);
-
-                        list.Add(new DiscoveredPrinter
+                        byName[metadata.Name] = new DiscoveredPrinter
                         {
-                            Name = printerName,
-                            Model = printerName,
-                            Status = isOnline ? "ONLINE" : "OFFLINE",
-                            IsDefault = string.Equals(printerName, defaultPrinterName, StringComparison.OrdinalIgnoreCase),
+                            Name = metadata.Name,
+                            Model = string.IsNullOrWhiteSpace(metadata.DriverName) ? metadata.Name : metadata.DriverName,
+                            DriverName = metadata.DriverName,
+                            PortName = metadata.PortName,
+                            ConnectionType = GetConnectionType(metadata.Attributes, metadata.PortName),
+                            ErrorState = flaggedError ?? (printerSettings.IsValid ? null : "Printer driver is unavailable."),
+                            Status = available ? "ONLINE" : "OFFLINE",
+                            IsAvailable = available,
+                            IsDefault = string.Equals(metadata.Name, defaultPrinterName, StringComparison.OrdinalIgnoreCase),
                             IsVirtual = isVirtual,
-                            SupportsColor = printerSettings.SupportsColor,
-                            SupportsDuplex = printerSettings.CanDuplex,
-                            SupportedSizes = printerSettings.PaperSizes.Cast<PaperSize>()
-                                .Select(paper => NormalizePaperSize(paper.PaperName))
-                                .Where(size => !string.IsNullOrWhiteSpace(size))
-                                .Distinct(StringComparer.OrdinalIgnoreCase)
-                                .ToList(),
-                            InkLevel = 85 + (Math.Abs(printerName.GetHashCode()) % 15),
-                            PaperLevel = 75 + (Math.Abs(printerName.GetHashCode()) % 25)
-                        });
+                            SupportsColor = printerSettings.IsValid && printerSettings.SupportsColor,
+                            SupportsDuplex = printerSettings.IsValid && printerSettings.CanDuplex,
+                            SupportedSizes = printerSettings.IsValid
+                                ? printerSettings.PaperSizes.Cast<PaperSize>()
+                                    .Select(paper => NormalizePaperSize(paper.PaperName))
+                                    .Where(size => !string.IsNullOrWhiteSpace(size))
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .ToList()
+                                : new List<string>()
+                        };
                     }
                     catch (Exception ex)
                     {
-                        LoggerService.LogWarn($"Error querying printer '{printerName}': {ex.Message}");
+                        LoggerService.LogWarn($"Windows could not query an installed printer: {ex.Message}");
                     }
+                }
+
+                // Keep entries that the .NET print API sees even when a driver does not expose
+                // PRINTER_INFO_2 metadata. These are shown as unavailable rather than guessed ready.
+                foreach (string printerName in PrinterSettings.InstalledPrinters)
+                {
+                    if (byName.ContainsKey(printerName)) continue;
+                    var printerSettings = new PrinterSettings { PrinterName = printerName };
+                    byName[printerName] = new DiscoveredPrinter
+                    {
+                        Name = printerName,
+                        Model = printerName,
+                        ConnectionType = "UNKNOWN",
+                        ErrorState = "Windows did not provide printer driver or port details.",
+                        Status = "OFFLINE",
+                        IsAvailable = false,
+                        IsDefault = string.Equals(printerName, defaultPrinterName, StringComparison.OrdinalIgnoreCase),
+                        IsVirtual = IsVirtualPrinter(printerName, string.Empty, string.Empty),
+                        SupportsColor = printerSettings.IsValid && printerSettings.SupportsColor,
+                        SupportsDuplex = printerSettings.IsValid && printerSettings.CanDuplex,
+                        SupportedSizes = printerSettings.IsValid
+                            ? printerSettings.PaperSizes.Cast<PaperSize>().Select(p => NormalizePaperSize(p.PaperName)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                            : new List<string>()
+                    };
                 }
             }
             catch (Exception ex)
@@ -93,8 +138,128 @@ namespace PrintQRAgent.Services
                 LoggerService.LogError("Failed to enumerate Windows printers", ex);
             }
 
-            return list;
+            return byName.Values.OrderByDescending(printer => printer.IsDefault).ThenBy(printer => printer.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
+
+        public static DiscoveredPrinter? SelectPhysicalPrinter(IEnumerable<DiscoveredPrinter> printers, string? savedPrinterName)
+        {
+            var discovered = printers.ToList();
+            var usable = discovered.Where(printer => printer.IsPhysical && printer.IsAvailable).ToList();
+            if (!string.IsNullOrWhiteSpace(savedPrinterName))
+            {
+                var saved = discovered.FirstOrDefault(printer => string.Equals(printer.Name, savedPrinterName, StringComparison.OrdinalIgnoreCase));
+                return saved is { IsPhysical: true, IsAvailable: true } ? saved : null;
+            }
+            if (usable.Count == 1) return usable[0];
+            return usable.FirstOrDefault(printer => printer.IsDefault);
+        }
+
+        private static List<PrinterMetadata> TryEnumeratePrinterMetadata(out string? error)
+        {
+            error = null;
+            uint flags = PrinterEnumLocal | PrinterEnumConnections;
+            _ = EnumPrinters(flags, null, 2, IntPtr.Zero, 0, out var required, out _);
+            var nativeError = Marshal.GetLastWin32Error();
+            if (required == 0)
+            {
+                if (nativeError != 0 && nativeError != 122) error = new System.ComponentModel.Win32Exception(nativeError).Message;
+                return new List<PrinterMetadata>();
+            }
+
+            var buffer = Marshal.AllocHGlobal((int)required);
+            try
+            {
+                if (!EnumPrinters(flags, null, 2, buffer, required, out _, out var returned))
+                {
+                    error = new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()).Message;
+                    return new List<PrinterMetadata>();
+                }
+                var result = new List<PrinterMetadata>((int)returned);
+                var itemSize = Marshal.SizeOf<PrinterInfo2>();
+                for (var index = 0; index < returned; index++)
+                {
+                    var info = Marshal.PtrToStructure<PrinterInfo2>(IntPtr.Add(buffer, checked((int)index * itemSize)));
+                    var name = Marshal.PtrToStringUni(info.PrinterName) ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    result.Add(new PrinterMetadata(name, Marshal.PtrToStringUni(info.DriverName) ?? string.Empty,
+                        Marshal.PtrToStringUni(info.PortName) ?? string.Empty, info.Attributes, info.Status));
+                }
+                return result;
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        }
+
+        private static string? GetPrinterError(uint status)
+        {
+            if ((status & PrinterStatusPaperJam) != 0) return "Paper jam reported by Windows.";
+            if ((status & PrinterStatusPaperOut) != 0) return "Printer reports that paper is out.";
+            if ((status & PrinterStatusDoorOpen) != 0) return "Printer cover or door is open.";
+            if ((status & PrinterStatusOffline) != 0) return "Printer is offline.";
+            if ((status & PrinterStatusNotAvailable) != 0) return "Printer is not available.";
+            if ((status & PrinterStatusUserIntervention) != 0) return "Printer requires user attention.";
+            if ((status & PrinterStatusError) != 0) return "Windows reports a printer error.";
+            return null;
+        }
+
+        public static bool IsVirtualPrinter(string name, string driver = "", string port = "")
+        {
+            var description = $"{name} {driver} {port}";
+            return new[] { "Microsoft Print to PDF", "Microsoft XPS Document Writer", "OneNote", "Fax", "Adobe PDF", "PDFCreator", "PaperPort" }
+                       .Any(marker => description.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                   || port.StartsWith("FILE:", StringComparison.OrdinalIgnoreCase)
+                   || port.StartsWith("PORTPROMPT:", StringComparison.OrdinalIgnoreCase)
+                   || port.Equals("NUL:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetConnectionType(uint attributes, string port)
+        {
+            return ClassifyConnectionType(port,
+                (attributes & PrinterAttributeNetwork) != 0,
+                (attributes & PrinterAttributeShared) != 0);
+        }
+
+        public static string ClassifyConnectionType(string port, bool isNetwork = false, bool isShared = false)
+        {
+            if (isNetwork) return "NETWORK_IP";
+            if (isShared) return "SHARED_SPOOLER";
+            if (port.StartsWith("USB", StringComparison.OrdinalIgnoreCase)) return "USB";
+            if (port.StartsWith("WSD", StringComparison.OrdinalIgnoreCase)
+                || port.StartsWith("IP_", StringComparison.OrdinalIgnoreCase)
+                || port.StartsWith("IPP", StringComparison.OrdinalIgnoreCase)
+                || port.StartsWith("\\\\", StringComparison.OrdinalIgnoreCase)) return "NETWORK_IP";
+            return string.IsNullOrWhiteSpace(port) ? "UNKNOWN" : "LOCAL";
+        }
+
+        private sealed record PrinterMetadata(string Name, string DriverName, string PortName, uint Attributes, uint StatusFlags);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PrinterInfo2
+        {
+            public IntPtr ServerName;
+            public IntPtr PrinterName;
+            public IntPtr ShareName;
+            public IntPtr PortName;
+            public IntPtr DriverName;
+            public IntPtr Comment;
+            public IntPtr Location;
+            public IntPtr DevMode;
+            public IntPtr SeparatorFile;
+            public IntPtr PrintProcessor;
+            public IntPtr DataType;
+            public IntPtr Parameters;
+            public IntPtr SecurityDescriptor;
+            public uint Attributes;
+            public uint Priority;
+            public uint DefaultPriority;
+            public uint StartTime;
+            public uint UntilTime;
+            public uint Status;
+            public uint Jobs;
+            public uint AveragePagesPerMinute;
+        }
+
+        [DllImport("winspool.drv", EntryPoint = "EnumPrintersW", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern bool EnumPrinters(uint flags, string? name, uint level, IntPtr buffer, uint bufferSize, out uint needed, out uint returned);
 
         /// <summary>
         /// Generates and spools a physical diagnostic test print to the specified Windows printer
@@ -207,6 +372,8 @@ namespace PrintQRAgent.Services
                 if (!allowedMimeTypes.TryGetValue(job.MimeType, out var extension)) return (false, "This file type is not supported by the Windows print agent.");
                 if (string.IsNullOrWhiteSpace(agentToken)) return (false, "The agent is not paired with a shop.");
                 if (job.Settings.Copies < 1 || job.Settings.Copies > 100) return (false, "The requested copy count is outside the supported range.");
+                if (string.IsNullOrWhiteSpace(targetPrinterName) || IsVirtualPrinter(targetPrinterName, string.Empty, string.Empty))
+                    return (false, "Select an installed physical printer before processing customer orders. Virtual printers are not valid customer destinations.");
 
                 // Download only from the configured API host using the per-user protected agent credential.
                 var configuredApi = new Uri(serverUrl);
@@ -268,14 +435,16 @@ namespace PrintQRAgent.Services
 
                 // 3. Configure Windows PrintDocument Spooler
                 using var printDoc = new PrintDocument();
-                printDoc.PrinterSettings.PrinterName = string.IsNullOrWhiteSpace(targetPrinterName)
-                    ? (printDoc.PrinterSettings.PrinterName ?? "Microsoft Print to PDF")
-                    : targetPrinterName;
+                printDoc.PrinterSettings.PrinterName = targetPrinterName;
 
                 if (!printDoc.PrinterSettings.IsValid)
                 {
                     return (false, $"Target printer '{targetPrinterName}' is unavailable or offline.");
                 }
+                if (job.Settings.ColorMode == "COLOR" && !printDoc.PrinterSettings.SupportsColor)
+                    return (false, "The selected printer does not report color support; the job was not downgraded to black and white.");
+                if (job.Settings.DuplexMode != "SIMPLEX" && !printDoc.PrinterSettings.CanDuplex)
+                    return (false, "The selected printer does not report duplex support; the job was not downgraded to single-sided.");
 
                 printDoc.DocumentName = $"AnishNova_{job.OrderNumber}_{job.FileName}";
                 printDoc.PrinterSettings.Copies = (short)Math.Max(1, job.Settings.Copies);
@@ -290,11 +459,11 @@ namespace PrintQRAgent.Services
                 printDoc.DefaultPageSettings.PaperSize = availablePaperSize;
 
                 // Duplex Configuration
-                if (job.Settings.DuplexMode == "DUPLEX_LONG_EDGE" && printDoc.PrinterSettings.CanDuplex)
+                if (job.Settings.DuplexMode == "DUPLEX_LONG_EDGE")
                 {
                     printDoc.PrinterSettings.Duplex = Duplex.Vertical;
                 }
-                else if (job.Settings.DuplexMode == "DUPLEX_SHORT_EDGE" && printDoc.PrinterSettings.CanDuplex)
+                else if (job.Settings.DuplexMode == "DUPLEX_SHORT_EDGE")
                 {
                     printDoc.PrinterSettings.Duplex = Duplex.Horizontal;
                 }

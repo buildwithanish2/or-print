@@ -110,7 +110,7 @@ namespace PrintQRAgent
 
                 var contextMenu = new ContextMenuStrip();
                 contextMenu.Items.Add("Open Dashboard", null, (s, e) => ShowDashboard());
-                contextMenu.Items.Add("Refresh Printers", null, (s, e) => _mainWindow?.RefreshPrinters());
+                contextMenu.Items.Add("Refresh Printers", null, (s, e) => { if (_mainWindow != null) _ = _mainWindow.RefreshPrintersAndSyncAsync(); });
                 contextMenu.Items.Add("Diagnostic Test Print", null, (s, e) => _mainWindow?.TriggerTestPrint());
                 contextMenu.Items.Add(new ToolStripSeparator());
                 contextMenu.Items.Add("View Logs", null, (s, e) => OpenLogFile());

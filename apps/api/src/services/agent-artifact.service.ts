@@ -7,6 +7,7 @@ export interface AgentReleaseManifest {
   mandatory: boolean;
   releaseDate: string;
   channel: string;
+  signatureRequired?: boolean;
   releaseNotes: string[];
   installer: { fileName: string; fileSize: number; sha256: string };
   binary: { fileName: string; fileSize: number; sha256: string };
@@ -70,6 +71,7 @@ export function readAgentReleaseManifest(downloadsDir = DOWNLOADS_DIR): AgentRel
       !!artifact && artifact.fileName === expectedFileName && Number.isSafeInteger(artifact.fileSize) && artifact.fileSize >= MINIMUM_EXECUTABLE_SIZE && /^[a-f0-9]{64}$/i.test(artifact.sha256);
 
     if (!manifest || !validVersion.test(manifest.latestVersion) || !validVersion.test(manifest.minimumSupportedVersion)
+      || (manifest.signatureRequired !== undefined && typeof manifest.signatureRequired !== 'boolean')
       || !validArtifact(manifest.installer, 'AnishNovaPrintAgent-Setup.exe')
       || !validArtifact(manifest.binary, 'PrintQRAgent.exe')) return null;
 

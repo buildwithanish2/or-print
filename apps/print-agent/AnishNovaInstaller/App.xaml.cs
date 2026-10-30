@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
+using PrintQRAgent.Services;
 using System.Windows;
 
 namespace AnishNovaInstaller
@@ -12,6 +13,21 @@ namespace AnishNovaInstaller
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            var metadata = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>();
+            if (metadata.FirstOrDefault(attribute => attribute.Key == "InstallerSignatureRequired")?.Value == "true")
+            {
+                var executable = Environment.ProcessPath;
+                var signatureValid = !string.IsNullOrWhiteSpace(executable)
+                    && AuthenticodeVerifier.IsTrusted(executable, "AnishNova Technologies", out _);
+                if (!signatureValid)
+                {
+                    MessageBox.Show("Windows could not verify this installer or its publisher. Download a verified installer from the Shop Dashboard.",
+                        "Installer signature check failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Shutdown(-1);
+                    return;
+                }
+            }
 
             if (e.Args.Contains("--verify-agent-payload", StringComparer.Ordinal))
             {
