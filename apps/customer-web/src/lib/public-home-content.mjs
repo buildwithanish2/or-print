@@ -27,5 +27,27 @@ export function resolveAgentRelease(response) {
 }
 
 export function resolvePublicNavigation(apiItems, fallbackItems) {
-  return Array.isArray(apiItems) && apiItems.length > 0 ? apiItems : fallbackItems;
+  const items = Array.isArray(apiItems) && apiItems.length > 0 ? apiItems : fallbackItems;
+  if (!Array.isArray(items)) return [];
+
+  const seen = new Set();
+  const uniqueItems = items.filter((item) => {
+    if (!item || typeof item.label !== 'string' || !item.label.trim()) return false;
+    const label = item.label.trim().toLowerCase().replace(/\s+/g, ' ');
+    const identity = /\bcontact\b/.test(label)
+      ? 'contact'
+      : /\bpartner\b/.test(label)
+        ? 'partner'
+        : `${label}|${typeof item.path === 'string' ? item.path.trim().toLowerCase() : ''}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+
+  return uniqueItems.length === items.length ? items : uniqueItems;
+}
+
+export function hasPublicNavigationTopic(items, topic) {
+  const pattern = topic === 'contact' ? /\bcontact\b/i : topic === 'partner' ? /\bpartner\b/i : null;
+  return Boolean(pattern && Array.isArray(items) && items.some((item) => pattern.test(item?.label || '')));
 }

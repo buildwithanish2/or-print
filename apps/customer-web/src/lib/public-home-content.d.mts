@@ -17,3 +17,4 @@ export interface AgentRelease {
 export function resolvePublicPlans(apiPlans: unknown): PublicPlan[];
 export function resolveAgentRelease(response: unknown): AgentRelease;
 export function resolvePublicNavigation<T>(apiItems: unknown, fallbackItems: T[]): T[];
+export function hasPublicNavigationTopic(items: unknown, topic: 'contact' | 'partner'): boolean;

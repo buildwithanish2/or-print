@@ -6,26 +6,36 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recha
 export const PlatformOverview: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchPlatformMetrics = async () => {
-      try {
-        const res = await api.get('/admin/metrics');
-        if (res.data.success) {
-          setData(res.data.data);
-        }
-      } catch (err) {
-        console.error('Failed to load admin metrics:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchPlatformMetrics = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await api.get('/admin/metrics');
+      if (!res.data.success || !res.data.data) throw new Error(res.data.message || 'Platform metrics are unavailable.');
+      setData(res.data.data);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load platform metrics. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchPlatformMetrics();
-  }, []);
+  useEffect(() => { void fetchPlatformMetrics(); }, []);
 
-  if (loading || !data) {
+  if (loading) {
     return <div className="p-8 text-center text-xs text-slate-400">Loading platform analytics...</div>;
+  }
+
+  if (loadError || !data) {
+    return (
+      <div className="mx-auto max-w-xl rounded-2xl border border-rose-500/20 bg-slate-900 p-6 text-center" role="alert">
+        <p className="text-sm font-semibold text-rose-300">Platform overview could not be loaded</p>
+        <p className="mt-2 text-xs text-slate-400">{loadError || 'No overview data was returned.'}</p>
+        <button type="button" onClick={() => void fetchPlatformMetrics()} className="mt-4 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300">Try again</button>
+      </div>
+    );
   }
 
   const { metrics, recentShops, recentOrders, auditLogs } = data;
@@ -103,7 +113,7 @@ export const PlatformOverview: React.FC = () => {
                   </p>
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                  {log.ipAddress || '127.0.0.1'}
+                  {log.ipAddress || 'IP unavailable'}
                 </span>
               </div>
             ))}

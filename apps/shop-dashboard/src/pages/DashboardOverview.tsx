@@ -1,31 +1,41 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { IndianRupee, ShoppingBag, Clock, CheckCircle, AlertTriangle, Printer, TrendingUp, Sparkles, ArrowUpRight } from 'lucide-react';
+import { IndianRupee, ShoppingBag, Clock, CheckCircle, AlertTriangle, Printer, Sparkles, ArrowUpRight } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
 
 export const DashboardOverview: React.FC = () => {
   const [metrics, setMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const res = await api.get('/shops/metrics');
-        if (res.data.success) {
-          setMetrics(res.data.data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch dashboard metrics:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchMetrics = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await api.get('/shops/metrics');
+      if (!res.data.success || !res.data.data) throw new Error(res.data.message || 'Shop metrics are unavailable.');
+      setMetrics(res.data.data);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load shop metrics. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchMetrics();
-  }, []);
+  useEffect(() => { void fetchMetrics(); }, []);
 
-  if (loading || !metrics) {
+  if (loading) {
     return <div className="p-8 text-center text-xs text-slate-400">Loading shop overview...</div>;
+  }
+
+  if (loadError || !metrics) {
+    return (
+      <div className="mx-auto max-w-xl rounded-2xl border border-rose-500/20 bg-slate-900 p-6 text-center" role="alert">
+        <p className="text-sm font-semibold text-rose-300">Shop overview could not be loaded</p>
+        <p className="mt-2 text-xs text-slate-400">{loadError || 'No overview data was returned.'}</p>
+        <button type="button" onClick={() => void fetchMetrics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">Try again</button>
+      </div>
+    );
   }
 
   const statCards = [
@@ -65,10 +75,6 @@ export const DashboardOverview: React.FC = () => {
             <div>
               <h3 className="font-bold text-sm text-white">Daily Revenue Trend</h3>
               <p className="text-xs text-slate-400">Order revenue over the last 7 days</p>
-            </div>
-            <div className="flex items-center space-x-1 text-xs text-emerald-400 font-semibold bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span>+18.4%</span>
             </div>
           </div>
 
